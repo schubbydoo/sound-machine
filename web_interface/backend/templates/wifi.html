@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wi‑Fi</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+</head>
+<body>
+<section class="section">
+  <div class="container">
+    <h1 class="title">Wi‑Fi</h1>
+    <div class="box">
+      <div class="level">
+        <div class="level-left">
+          <div class="level-item">
+            <label class="checkbox">
+              <input type="checkbox" id="auto" onchange="toggleAuto(this.checked)" {% if wcfg.autoConnect %}checked{% endif %}>
+              Auto-connect to known networks
+            </label>
+          </div>
+        </div>
+        <div class="level-right">
+          <div class="level-item">
+            <button class="button is-small" onclick="rescan()">Rescan</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="columns">
+      <div class="column">
+        <div class="box">
+          <h2 class="subtitle">Nearby Networks</h2>
+          <table class="table is-fullwidth is-striped is-hoverable">
+            <thead><tr><th>SSID</th><th>Security</th><th>Signal</th><th>Connect</th><th>Remember</th></tr></thead>
+            <tbody>
+              {% if nets %}
+              {% for n in nets %}
+              <tr>
+                <td><code>{{ n.ssid }}</code></td>
+                <td>{{ n.security }}</td>
+                <td>{{ n.signal }}</td>
+                <td>
+                  <div class="field has-addons">
+                    <div class="control">
+                      <input class="input is-small" type="password" id="pw-{{ n.ssid }}" placeholder="Password (if needed)">
+                    </div>
+                    <div class="control">
+                      <button class="button is-small is-primary" onclick="connect('{{ n.ssid }}')">Connect</button>
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  <div class="field has-addons">
+                    <div class="control">
+                      <input class="input is-small" type="password" id="rpw-{{ n.ssid }}" placeholder="Save password">
+                    </div>
+                    <div class="control">
+                      <button class="button is-small" onclick="remember('{{ n.ssid }}')">Remember</button>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+              {% else %}
+              <tr><td colspan="5">No networks found. Try Rescan.</td></tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="column">
+        <div class="box">
+          <h2 class="subtitle">Manual Add</h2>
+          <div class="field">
+            <label class="label">SSID</label>
+            <div class="control">
+              <input class="input" id="m-ssid" placeholder="Network name (SSID)">
+            </div>
+          </div>
+          <div class="field">
+            <label class="label">Password</label>
+            <div class="control">
+              <input class="input" id="m-pass" type="password" placeholder="Password (if required)">
+            </div>
+          </div>
+          <div class="buttons">
+            <button class="button is-primary" onclick="connectManual()">Connect</button>
+            <button class="button" onclick="rememberManual()">Remember</button>
+          </div>
+        </div>
+
+        <div class="box">
+          <h2 class="subtitle">Known Networks</h2>
+          <table class="table is-fullwidth is-striped">
+            <thead><tr><th>SSID</th><th>Auto-connect</th><th>Priority</th><th>Actions</th></tr></thead>
+            <tbody>
+            {% if wcfg.known %}
+              {% for ssid, meta in wcfg.known.items() %}
+              <tr>
+                <td><code>{{ ssid }}</code></td>
+                <td>
+                  <label class="checkbox">
+                    <input type="checkbox" id="auto-{{ ssid }}" {% if meta.auto %}checked{% endif %}>
+                  </label>
+                </td>
+                <td>
+                  <input class="input is-small" style="max-width: 6rem" id="prio-{{ ssid }}" type="number" value="{{ meta.priority }}" />
+                </td>
+                <td>
+                  <div class="buttons are-small">
+                    <button class="button is-info" onclick="applyAuto('{{ ssid }}')">Apply</button>
+                    <button class="button is-light" onclick="forget('{{ ssid }}')">Forget</button>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+            {% else %}
+              <tr><td colspan="4">No saved networks.</td></tr>
+            {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+<script>
+async function connect(ssid){
+  const pw = document.getElementById('pw-'+ssid)?.value || '';
+  const res = await fetch('/wifi/connect', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ssid:ssid, password:pw})});
+  const js = await res.json();
+  if(!js.ok){ alert('Connect failed: '+(js.error||'')); } else { alert('Connect: '+js.output); }
+}
+async function remember(ssid){
+  const pw = document.getElementById('rpw-'+ssid)?.value || '';
+  const res = await fetch('/wifi/remember', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ssid:ssid, password:pw})});
+  const js = await res.json();
+  if(!js.ok){ alert('Remember failed: '+(js.error||'')); } else { location.reload(); }
+}
+async function connectManual(){
+  const ssid = document.getElementById('m-ssid').value;
+  const pw = document.getElementById('m-pass').value;
+  const res = await fetch('/wifi/connect', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ssid:ssid, password:pw})});
+  const js = await res.json();
+  if(!js.ok){ alert('Connect failed: '+(js.error||'')); } else { alert('Connect: '+js.output); }
+}
+async function rememberManual(){
+  const ssid = document.getElementById('m-ssid').value;
+  const pw = document.getElementById('m-pass').value;
+  const res = await fetch('/wifi/remember', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ssid:ssid, password:pw})});
+  const js = await res.json();
+  if(!js.ok){ alert('Remember failed: '+(js.error||'')); } else { location.reload(); }
+}
+async function forget(ssid){
+  const res = await fetch('/wifi/forget', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ssid:ssid})});
+  const js = await res.json();
+  if(!js.ok){ alert('Forget failed: '+(js.error||'')); } else { location.reload(); }
+}
+async function toggleAuto(checked){
+  const res = await fetch('/wifi/auto', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({enable: checked})});
+  const js = await res.json();
+  if(!js.ok){ alert('Toggle failed'); }
+}
+async function rescan(){
+  location.reload();
+}
+async function applyAuto(ssid){
+  const en = document.getElementById('auto-'+ssid).checked;
+  const prio = parseInt(document.getElementById('prio-'+ssid).value||'0',10);
+  const res = await fetch('/wifi/auto', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ssid:ssid, enable: en, priority: prio})});
+  const js = await res.json();
+  if(!js.ok){ alert('Apply failed: '+(js.error||'')); } else { alert('Updated'); }
+}
+</script>
+</body>
+</html>

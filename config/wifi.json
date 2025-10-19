@@ -1,0 +1,20 @@
+{
+  "autoConnect": false,
+  "known": {
+    "Homenet1": {
+      "password": "",
+      "auto": true,
+      "priority": 0
+    },
+    "cityarts_Guest": {
+      "password": "CityArts39!",
+      "auto": false,
+      "priority": 0
+    },
+    "schubnet": {
+      "password": "W8ter5ki3r",
+      "auto": false,
+      "priority": 0
+    }
+  }
+}

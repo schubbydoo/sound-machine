@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sound Machine</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+</head>
+<body>
+<section class="section">
+  <div class="container">
+    <h1 class="title">Sound Machine</h1>
+    <p class="subtitle">ALSA device: {{ aplay_device }}</p>
+
+    <div class="box">
+      <form id="uploadForm" onsubmit="return uploadFile(event)">
+        <div class="field has-addons">
+          <div class="control is-expanded">
+            <input class="input" type="file" id="file" accept=".wav" required>
+          </div>
+          <div class="control">
+            <button class="button is-primary" type="submit">Upload WAV</button>
+          </div>
+        </div>
+      </form>
+      <div class="content">
+        <p><strong>Files:</strong></p>
+        <div class="tags" id="fileList">
+          {% for f in files %}
+            <span class="tag is-light">
+              {{ f }}
+              <button class="delete is-small" onclick="delFile('{{ f }}')"></button>
+            </span>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="box">
+      <div class="level">
+        <div class="level-left">
+          <div class="level-item">
+            <button class="button is-success" onclick="saveAll()">Save All Assignments</button>
+          </div>
+        </div>
+      </div>
+      <table class="table is-fullwidth is-striped is-hoverable">
+        <thead>
+          <tr>
+            <th>Button</th>
+            <th>Current</th>
+            <th>Assign</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for e in mapping %}
+          <tr>
+            <td>{{ e.id }}</td>
+            <td>{% if e.name %}<code>{{ e.name }}</code>{% else %}<em>Unassigned</em>{% endif %}{% if e.name and not e.exists %} <span class="tag is-danger is-light">Missing</span>{% endif %}</td>
+            <td>
+              <div class="select is-small">
+                <select id="sel{{ e.id }}">
+                  <option value="">— Unassigned —</option>
+                  {% for f in files %}
+                    <option value="{{ f }}" {% if e.name == f %}selected{% endif %}>{{ f }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </td>
+            <td>
+              <button class="button is-small is-info" onclick="assignOne({{ e.id }})">Assign</button>
+              <button class="button is-small is-link is-light" onclick="play({{ e.id }})" {% if not e.exists %}disabled{% endif %}>Play</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+<script>
+async function play(id){
+  try{
+    const res = await fetch(`/play/${id}`, {method:'POST'});
+    const js = await res.json();
+    if(!js.ok){ alert('Error: '+(js.error||('rc='+js.rc))); }
+  }catch(e){ alert('Request failed'); }
+}
+
+async function uploadFile(ev){
+  ev.preventDefault();
+  const fd = new FormData();
+  const f = document.getElementById('file').files[0];
+  if(!f){ return false; }
+  fd.append('file', f);
+  const res = await fetch('/upload', {method:'POST', body: fd});
+  const js = await res.json();
+  if(js.ok){ location.reload(); } else { alert('Upload failed: '+(js.error||'')); }
+  return false;
+}
+
+async function delFile(name){
+  if(!confirm('Delete '+name+'?')) return;
+  const fd = new FormData();
+  fd.append('name', name);
+  const res = await fetch('/delete', {method:'POST', body: fd});
+  const js = await res.json();
+  if(js.ok){ location.reload(); } else { alert('Delete failed: '+(js.error||'')); }
+}
+
+async function assignOne(id){
+  const sel = document.getElementById('sel'+id);
+  const name = sel.value;
+  const res = await fetch('/assign', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({button:id, name})});
+  const js = await res.json();
+  if(js.ok){ location.reload(); } else { alert('Assign failed: '+(js.error||'')); }
+}
+
+async function saveAll(){
+  const mapping = {};
+  for(let i=1;i<=16;i++){
+    const sel = document.getElementById('sel'+i);
+    if(sel){ mapping[i] = sel.value; }
+  }
+  const res = await fetch('/assign_bulk', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(mapping)});
+  const js = await res.json();
+  if(js.ok){ location.reload(); } else { alert('Save failed: '+(js.error||'')); }
+}
+</script>
+</body>
+</html>

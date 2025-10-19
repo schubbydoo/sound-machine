@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bluetooth</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+</head>
+<body>
+<section class="section">
+  <div class="container">
+    <h1 class="title">Bluetooth</h1>
+
+    <div class="box">
+      <div class="level">
+        <div class="level-left">
+          <div class="level-item">
+            <strong>Default device:</strong>
+            <span style="margin-left: .5rem">{{ bcfg.default or '—' }}</span>
+          </div>
+        </div>
+        <div class="level-right">
+          <div class="level-item">
+            <button class="button is-small" onclick="location.reload()">Rescan</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="columns">
+      <div class="column is-half">
+        <div class="box">
+          <h2 class="subtitle">Nearby Devices</h2>
+          <table class="table is-fullwidth is-striped is-hoverable">
+            <thead><tr><th>MAC</th><th>Name</th><th>Actions</th></tr></thead>
+            <tbody>
+              {% if devices %}
+              {% for d in devices %}
+              <tr>
+                <td><code>{{ d.mac }}</code></td>
+                <td>{{ d.name }}</td>
+                <td>
+                  <div class="buttons are-small">
+                    <button class="button is-primary" onclick="connectStart('{{ d.mac }}')">Connect</button>
+                    <button class="button" onclick="remember('{{ d.mac }}','{{ d.name }}', false)">Remember</button>
+                    <button class="button is-link is-light" onclick="remember('{{ d.mac }}','{{ d.name }}', true)">Remember + Default</button>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+              {% else %}
+              <tr><td colspan="3">No devices found. Ensure Bluetooth is on and device is discoverable.</td></tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="column is-half">
+        <div class="box">
+          <div class="level">
+            <h2 class="subtitle level-left">Paired Devices</h2>
+            <div class="level-right">
+              <button class="button is-small" onclick="refreshPaired()">Refresh Paired</button>
+            </div>
+          </div>
+          <table class="table is-fullwidth is-striped is-hoverable" id="pairedTable">
+            <thead><tr><th>MAC</th><th>Name</th><th>Actions</th></tr></thead>
+            <tbody>
+              {% if paired %}
+              {% for p in paired %}
+              <tr>
+                <td><code>{{ p.mac }}</code>{% if p.connected %} <span class="tag is-success is-light">Connected</span>{% endif %}</td>
+                <td>{{ p.name }}</td>
+                <td>
+                  <div class="buttons are-small">
+                    <button class="button is-primary" onclick="connectStart('{{ p.mac }}')">Connect</button>
+                    <button class="button" onclick="remember('{{ p.mac }}','{{ p.name }}', false)">Remember</button>
+                    <button class="button is-link is-light" onclick="remember('{{ p.mac }}','{{ p.name }}', true)">Remember + Default</button>
+                    <button class="button is-light" onclick="forget('{{ p.mac }}')">Forget</button>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+              {% else %}
+              <tr><td colspan="3">No paired devices.</td></tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+<script>
+async function connectStart(mac){
+  await fetch('/bt/connect_start', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mac})});
+  pollStatus();
+}
+
+function showModal(title, body){
+  const m = document.createElement('div');
+  m.className = 'modal is-active';
+  m.innerHTML = `
+  <div class="modal-background"></div>
+  <div class="modal-card" style="width: 90vw; max-width: 900px;">
+    <header class="modal-card-head">
+      <p class="modal-card-title">${title}</p>
+      <button class="delete" aria-label="close"></button>
+    </header>
+    <section class="modal-card-body">
+      <textarea class="textarea" rows="16" readonly>${body}</textarea>
+    </section>
+    <footer class="modal-card-foot">
+      <button class="button is-primary">Close</button>
+    </footer>
+  </div>`;
+  m.querySelector('.delete').onclick = () => m.remove();
+  m.querySelector('.button').onclick = () => m.remove();
+  document.body.appendChild(m);
+}
+
+async function refreshPaired(){
+  try{
+    const res = await fetch('/bt/paired');
+    const js = await res.json();
+    if(!js.ok) return;
+    const tbody = document.querySelector('#pairedTable tbody');
+    if(!tbody) return;
+    tbody.innerHTML = '';
+    if(!js.paired || js.paired.length===0){
+      tbody.innerHTML = '<tr><td colspan="3">No paired devices.</td></tr>';
+      return;
+    }
+    for(const p of js.paired){
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><code>${p.mac}</code> ${p.connected?'<span class="tag is-success is-light">Connected</span>':''}</td>
+        <td>${p.name || ''}</td>
+        <td>
+          <div class="buttons are-small">
+            <button class="button is-primary" onclick="connect('${p.mac}')">Connect</button>
+            <button class="button" onclick="remember('${p.mac}','${p.name||''}', false)">Remember</button>
+            <button class="button is-link is-light" onclick="remember('${p.mac}','${p.name||''}', true)">Remember + Default</button>
+            <button class="button is-light" onclick="forget('${p.mac}')">Forget</button>
+          </div>
+        </td>`;
+      tbody.appendChild(tr);
+    }
+  }catch(e){ /* noop */ }
+}
+
+async function pollStatus(){
+  const res = await fetch('/bt/status');
+  const js = await res.json();
+  if(js.ok){
+    const lines = [];
+    lines.push('Default sink: '+(js.default_sink||''));
+    lines.push('--- Transcript (tail) ---');
+    lines.push(js.transcript||'');
+    showModal('BT Status', lines.join('\n'));
+    // update paired table live
+    if(js.paired){
+      const tbody = document.querySelector('#pairedTable tbody');
+      if(tbody){
+        tbody.innerHTML = '';
+        for(const p of js.paired){
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td><code>${p.mac}</code> ${p.connected?'<span class="tag is-success is-light">Connected</span>':''}</td>
+            <td>${p.name||''}</td>
+            <td>
+              <div class="buttons are-small">
+                <button class="button is-primary" onclick="connectStart('${p.mac}')">Connect</button>
+                <button class="button" onclick="remember('${p.mac}','${p.name||''}', false)">Remember</button>
+                <button class="button is-link is-light" onclick="remember('${p.mac}','${p.name||''}', true)">Remember + Default</button>
+                <button class="button is-light" onclick="forget('${p.mac}')">Forget</button>
+              </div>
+            </td>`;
+          tbody.appendChild(tr);
+        }
+      }
+    }
+  }
+}
+async function remember(mac, name, makeDefault){
+  const res = await fetch('/bt/remember', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mac, name, 'default': makeDefault})});
+  const js = await res.json();
+  if(!js.ok){ alert('Remember failed: '+(js.error||'')); } else { location.reload(); }
+}
+async function forget(mac){
+  const res = await fetch('/bt/forget', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mac})});
+  const js = await res.json();
+  if(!js.ok){ alert('Forget failed: '+(js.error||'')); } else { location.reload(); }
+}
+</script>
+</body>
+</html>

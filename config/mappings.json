@@ -1,0 +1,46 @@
+{
+  "activeProfile": "effects",
+  "device": {
+    "serial": "/dev/ttyACM0",
+    "aplayDevice": "pulse"
+  },
+  "profiles": {
+    "effects": {
+      "baseDir": "/home/soundconsole/sound-machine/Sounds/effects",
+      "ledButtons": [
+        1,
+        7,
+        9,
+        15
+      ],
+      "buttons": {
+        "1": "Doorbell.wav",
+        "2": "Cauldron Bubbling.wav",
+        "3": "Church Bells.wav",
+        "4": "Crow Calls.wav",
+        "5": "Doorbell.wav",
+        "6": "Witch Cackle.wav",
+        "7": "DragonGrowl.wav",
+        "8": "Ghost Moan.wav",
+        "9": "GoreSplatter.wav",
+        "10": "HeartBeatDrum.wav",
+        "11": "HorrorHit3.wav",
+        "12": "HorrorSting.wav",
+        "13": "HorrorSting2.wav",
+        "14": "Howling Wind.wav",
+        "15": "Knocking and Footsteps.wav",
+        "16": "MonsterGrowl.wav"
+      }
+    },
+    "trivia": {
+      "baseDir": "/home/soundconsole/sound-machine/Sounds/trivia",
+      "ledButtons": [
+        1,
+        7,
+        9,
+        15
+      ],
+      "buttons": {}
+    }
+  }
+}

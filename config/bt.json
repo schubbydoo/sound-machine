@@ -1,0 +1,11 @@
+{
+  "known": {
+    "4F:2B:03:57:D0:BB": {
+      "name": "4F-2B-03-57-D0-BB"
+    },
+    "D4:31:EF:CA:3C:BA": {
+      "name": "P1S"
+    }
+  },
+  "default": "D4:31:EF:CA:3C:BA"
+}
