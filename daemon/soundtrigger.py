@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """
-Sound Machine trigger daemon
+Sound Machine trigger daemon - Optimized for responsiveness
 - Reads Pico USB CDC (serial) lines in the format: P,<id>\n
-- Plays mapped WAV via aplay
+- Plays mapped WAV via aplay with immediate interruption
 - Sends LED override: L,<id>,1 during playback, then L,<id>,0
-
-This is a minimal working stub intended for development bring-up.
 """
 from __future__ import annotations
 
@@ -60,16 +58,12 @@ def build_button_map(profile_cfg: Dict[str, Any]) -> Dict[int, Path]:
     return mapping
 
 
-def open_serial(port: str, baudrate: int = 115200, timeout: float = 0.1) -> serial.Serial:
+def open_serial(port: str, baudrate: int = 115200, timeout: float = 0.01) -> serial.Serial:
     return serial.Serial(port=port, baudrate=baudrate, timeout=timeout)
 
 
 def resolve_serial_port(preferred: str) -> Optional[str]:
-    """Return a usable serial device path.
-
-    Tries the configured path first; if missing, tries stable by-id links;
-    finally falls back to the first /dev/ttyACM* discovered.
-    """
+    """Return a usable serial device path."""
     try:
         p = Path(preferred)
         if p.exists():
@@ -113,10 +107,23 @@ def clear_led_override(ser: serial.Serial, button_id: int) -> None:
     ser.flush()
 
 
-def play_wav(wav_path: Path, device: str) -> int:
+def play_wav_interruptible(wav_path: Path, device: str, current_process: Optional[subprocess.Popen], btn_id: int) -> Optional[subprocess.Popen]:
+    """Play a WAV file, interrupting any current playback."""
     if not wav_path.exists():
         print(f"WAV not found: {wav_path}", file=sys.stderr)
-        return 1
+        return current_process
+    
+    # Stop current playback first
+    if current_process and current_process.poll() is None:
+        print(f"STOP: interrupting current playback")
+        current_process.terminate()
+        try:
+            current_process.wait(timeout=0.5)
+        except subprocess.TimeoutExpired:
+            current_process.kill()
+            current_process.wait()
+    
+    # Start new playback
     cmd = [
         "aplay",
         "-q",
@@ -125,10 +132,11 @@ def play_wav(wav_path: Path, device: str) -> int:
         str(wav_path),
     ]
     try:
-        return subprocess.call(cmd)
+        print(f"PLAY: button={btn_id} file={wav_path} device={device}")
+        return subprocess.Popen(cmd)
     except FileNotFoundError:
         print("ERROR: 'aplay' not found. Install 'alsa-utils'.", file=sys.stderr)
-        return 1
+        return current_process
 
 
 def main() -> int:
@@ -143,15 +151,25 @@ def main() -> int:
     if not button_to_wav:
         print("No button mappings found. Edit config/mappings.json.", file=sys.stderr)
 
-    # Basic debounce window per button
+    # Simple state tracking for interruption
+    current_process: Optional[subprocess.Popen] = None
+    current_button: Optional[int] = None
+    
+    # Very short debounce for maximum responsiveness
     last_press_ts: Dict[int, float] = {}
-    debounce_ms = 80.0
+    debounce_ms = 20.0
 
     stop = False
 
     def handle_sig(signum, frame):
-        nonlocal stop
+        nonlocal stop, current_process
         stop = True
+        if current_process and current_process.poll() is None:
+            current_process.terminate()
+            try:
+                current_process.wait(timeout=1.0)
+            except subprocess.TimeoutExpired:
+                current_process.kill()
 
     signal.signal(signal.SIGINT, handle_sig)
     signal.signal(signal.SIGTERM, handle_sig)
@@ -159,6 +177,9 @@ def main() -> int:
     current_port: Optional[str] = None
     backoff_s = 0.5
     print(f"Sound trigger daemon starting. ALSA device='{aplay_device}'")
+    print(f"Looking for serial port: {configured_port}")
+    print(f"Button mappings: {len(button_to_wav)} buttons configured")
+    
     while not stop:
         # Ensure we have a serial port
         try:
@@ -199,14 +220,39 @@ def main() -> int:
                         print(f"No mapping for button {btn_id}")
                         continue
 
+                    # Handle button press with immediate response
                     try:
-                        print(f"PLAY: button={btn_id} file={wav_path} device={aplay_device}")
+                        # Turn off LED for previous button if any
+                        if current_button is not None:
+                            clear_led_override(ser, current_button)
+                        
+                        # Start new playback (this will interrupt any current playback)
+                        current_process = play_wav_interruptible(wav_path, aplay_device, current_process, btn_id)
+                        current_button = btn_id
+                        
+                        # Turn on LED for this button immediately
                         send_led(ser, btn_id, True)
-                        rc = play_wav(wav_path, aplay_device)
-                        if rc != 0:
-                            print(f"aplay exited with code {rc}")
-                    finally:
-                        clear_led_override(ser, btn_id)
+                        
+                        # Simple LED cleanup - check periodically if playback finished
+                        def cleanup_led():
+                            if current_process:
+                                current_process.wait()
+                                try:
+                                    clear_led_override(ser, btn_id)
+                                except Exception:
+                                    pass
+                        
+                        # Start LED cleanup in background
+                        import threading
+                        threading.Thread(target=cleanup_led, daemon=True).start()
+                            
+                    except Exception as e:
+                        print(f"Error handling button {btn_id}: {e}", file=sys.stderr)
+                        # Ensure LED is turned off on error
+                        try:
+                            clear_led_override(ser, btn_id)
+                        except Exception:
+                            pass
         except (serial.SerialException, FileNotFoundError) as exc:
             # Could not open the port; reset and retry
             print(f"Serial open failed on {current_port or configured_port}: {exc}")
@@ -216,6 +262,12 @@ def main() -> int:
         backoff_s = min(backoff_s * 1.5, 5.0)
 
     print("Exiting.")
+    if current_process and current_process.poll() is None:
+        current_process.terminate()
+        try:
+            current_process.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            current_process.kill()
     return 0
 
 

@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.venv/
+venv/
+.env
+
+# Node
+node_modules/
+web_interface/frontend/build/
+dist/
+
+# Logs
+log/
+*.log
+
+# Sounds (exclude big audio binaries from git; keep directories)
+Sounds/**
+
+# System
+.DS_Store
+
+# Caches
+.mypy_cache/
+.pytest_cache/

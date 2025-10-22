@@ -2,7 +2,7 @@
   "activeProfile": "effects",
   "device": {
     "serial": "/dev/ttyACM0",
-    "aplayDevice": "pulse"
+    "aplayDevice": "plughw:0,0"
   },
   "profiles": {
     "effects": {

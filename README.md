@@ -9,11 +9,13 @@
 
 # Sound Machine (Pico + Pi Zero 2W)
 
-Low-latency wired sound machine using a Raspberry Pi Pico (RP2040) for 16 buttons (with 4 LED buttons) and a Raspberry Pi Zero 2W for audio playback and an optional web UI.
+Low-latency wired sound machine using a Raspberry Pi Pico (RP2040) for 16 buttons (with 4 LED buttons) and a Raspberry Pi Zero 2W for audio playback and web UI.
 
 - **Transport**: USB CDC (Pico → Pi over USB)
 - **Audio**: USB DAC on the Pi (WAV files for minimal start latency)
 - **Latency target**: <30–50 ms button→sound using warmed ALSA and WAV
+- **Sound Interruption**: New button presses immediately stop current playback
+- **Web Interface**: Full-featured web UI with navigation, WiFi, and Bluetooth management
 
 ## Hardware Summary
 - **Buttons → Pico**: active-low to GND
@@ -82,7 +84,7 @@ sound-machine/
 ## Configuration (`config/mappings.json`)
 - **activeProfile**: the profile name to use.
 - **device.serial**: serial device path for Pico (e.g., `/dev/ttyACM0`).
-- **device.aplayDevice**: ALSA device for `aplay` (e.g., `default` or `plughw:1,0`).
+- **device.aplayDevice**: ALSA device for `aplay` (e.g., `plughw:0,0` for USB DAC).
 - **profiles[<name>].baseDir**: absolute path to profile sound directory.
 - **profiles[<name>].ledButtons**: array of button IDs that have LEDs.
 - **profiles[<name>].buttons**: map of button ID → WAV filename (relative to `baseDir`).
@@ -93,7 +95,7 @@ Example template:
   "activeProfile": "effects",
   "device": {
     "serial": "/dev/ttyACM0",
-    "aplayDevice": "default"
+    "aplayDevice": "plughw:0,0"
   },
   "profiles": {
     "effects": {
@@ -127,14 +129,40 @@ Example template:
 }
 ```
 
+## Web Interface
+The sound machine includes a full-featured web interface accessible at `http://localhost:8080` (or your Pi's IP address).
+
+### Features
+- **Sound Management**: Upload, delete, and assign WAV files to buttons
+- **Real-time Testing**: Play sounds directly from the web interface
+- **WiFi Configuration**: Connect to wireless networks with auto-connect settings
+- **Bluetooth Setup**: Connect and manage Bluetooth audio devices
+- **Navigation**: Clean, responsive interface with Bulma CSS framework
+
+### Starting the Web Server
+```bash
+cd /home/soundconsole/sound-machine
+source .venv/bin/activate
+pip install flask gunicorn
+gunicorn -w 2 -b 0.0.0.0:8080 web_interface.backend.wsgi:application
+```
+
 ## Systemd Service
 - Unit file at `systemd/soundtrigger.service` starts the daemon at boot.
 - It sets `SOUND_MACHINE_CONFIG` to point at `config/mappings.json`.
+
+## Performance Features
+- **Sound Interruption**: New button presses immediately stop current playback for responsive switching
+- **Optimized Debouncing**: 20ms debounce window for maximum responsiveness
+- **Rapid Button Handling**: System handles rapid button mashing without getting confused
+- **LED Management**: Proper LED feedback with background cleanup
+- **Kid-Friendly**: Designed to handle enthusiastic button pressing without lockups
 
 ## Notes on Latency
 - Use WAV (PCM) files and `aplay` for minimal startup overhead.
 - Keep files small and pre-warm the USB DAC by playing a short silent clip on boot if needed.
 - Consider a dedicated USB DAC and set `device.aplayDevice` accordingly.
+- Optimized daemon with sound interruption achieves <30-50ms button→sound latency.
 
 ## Troubleshooting
 - Check serial device presence: `ls /dev/ttyACM*`.
