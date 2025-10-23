@@ -166,10 +166,14 @@ gunicorn -w 2 -b 0.0.0.0:8080 web_interface.backend.wsgi:application
 
 ## Troubleshooting
 - Check serial device presence: `ls /dev/ttyACM*`.
-- Test audio output: `aplay -D default /path/to/test.wav`.
+- Test audio output: `aplay -D plughw:0,0 /path/to/test.wav`.
 - View logs: `journalctl -u soundtrigger.service -e`.
 - **Communication Issues**: If buttons stop working or Pico drops into REPL mode, use `main_robust.py` firmware instead of `main.py`.
 - **Pico Not Responding**: Test with `python3 daemon/peek_pico.py --port /dev/ttyACM0` - should show button states.
+- **Audio Format Errors**: If you see "Sample format non available" errors, the daemon now uses simplified aplay commands that handle format conversion automatically.
+- **Cheap Arcade Buttons**: The system now uses 50ms debouncing to handle multiple presses from cheap arcade buttons.
+- **Serial Stability**: Improved serial communication with better timeouts and error handling for disconnections.
+- **Pico Reset**: If the Pico stops responding, send reset commands: `python3 -c "import serial; ser=serial.Serial('/dev/ttyACM0', 115200); ser.write(b'\x03\x04'); ser.close()"`
 - See `docs/troubleshooting.md` for more.
 
 

@@ -87,11 +87,11 @@ while True:
                             sys.stdout.flush()
                         except Exception:
                             pass
-        time.sleep_ms(10)
+        time.sleep_ms(5)  # Faster polling for better responsiveness
         
-        # Periodic status to show we're alive
+        # Periodic status to show we're alive (less frequent)
         loop_count += 1
-        if loop_count % 1000 == 0:  # Every ~10 seconds
+        if loop_count % 2000 == 0:  # Every ~10 seconds
             print(f"Alive: {loop_count} loops")
             
     except KeyboardInterrupt:

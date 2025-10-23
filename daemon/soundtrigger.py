@@ -59,8 +59,22 @@ def build_button_map(profile_cfg: Dict[str, Any]) -> Dict[int, Path]:
     return mapping
 
 
-def open_serial(port: str, baudrate: int = 115200, timeout: float = 0.01) -> serial.Serial:
-    return serial.Serial(port=port, baudrate=baudrate, timeout=timeout)
+def open_serial(port: str, baudrate: int = 115200, timeout: float = 0.1) -> serial.Serial:
+    """Open serial connection with improved stability settings"""
+    ser = serial.Serial(
+        port=port, 
+        baudrate=baudrate, 
+        timeout=timeout,
+        write_timeout=1.0,
+        inter_byte_timeout=0.1,
+        rtscts=False,  # Disable hardware flow control
+        dsrdtr=False,  # Disable hardware flow control
+        xonxoff=False  # Disable software flow control
+    )
+    # Clear any existing data
+    ser.reset_input_buffer()
+    ser.reset_output_buffer()
+    return ser
 
 
 def resolve_serial_port(preferred: str) -> Optional[str]:
@@ -140,16 +154,12 @@ def play_wav_interruptible(wav_path: Path, device: str, current_process: Optiona
     except Exception:
         pass
     
-    # Try multiple approaches to handle different audio formats safely
-    # First try: aplay with format conversion to standard CD quality
-    # This prevents issues with high sample rate files (48kHz -> 44.1kHz)
+    # Simple, reliable aplay command without format forcing
+    # Let aplay handle format conversion automatically
     cmd = [
         "aplay",
         "-q",
         "-D", device,
-        "-f", "S16_LE",  # Force 16-bit signed little-endian
-        "-c", "2",       # Force stereo
-        "-r", "44100",   # Force 44.1kHz (CD quality) - prevents 48kHz issues
         str(wav_path),
     ]
     
@@ -159,19 +169,8 @@ def play_wav_interruptible(wav_path: Path, device: str, current_process: Optiona
         # Verify process started successfully
         time.sleep(0.1)
         if process.poll() is not None:
-            print(f"ERROR: aplay with format conversion failed", file=sys.stderr)
-            # Fallback: try without format forcing
-            cmd_fallback = [
-                "aplay",
-                "-q",
-                "-D", device,
-                str(wav_path),
-            ]
-            process = subprocess.Popen(cmd_fallback, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            time.sleep(0.1)
-            if process.poll() is not None:
-                print(f"ERROR: aplay fallback also failed", file=sys.stderr)
-                return current_process
+            print(f"ERROR: aplay failed", file=sys.stderr)
+            return current_process
         return process
     except Exception as e:
         print(f"ERROR: Failed to start playback: {e}", file=sys.stderr)
@@ -218,7 +217,7 @@ def main() -> int:
     
     # Very short debounce for maximum responsiveness
     last_press_ts: Dict[int, float] = {}
-    debounce_ms = 20.0
+    debounce_ms = 50.0  # Increased debounce for cheap arcade buttons
 
     stop = False
 
@@ -281,12 +280,17 @@ def main() -> int:
                 while not stop:
                     try:
                         line = ser.readline().decode("ascii", errors="ignore")
-                    except serial.SerialException:
+                    except (serial.SerialException, OSError) as e:
                         # Device likely disconnected; break to outer to re-open
-                        print("Serial exception; will re-open.")
+                        print(f"Serial exception ({e}); will re-open.")
                         break
+                    except Exception as e:
+                        print(f"Unexpected serial error ({e}); will re-open.")
+                        break
+                    
                     if line:
                         sys.stdout.write(f"SER:{line}")
+                        sys.stdout.flush()  # Ensure output is flushed
                     if not line:
                         continue
                     m = PRESS_RE.match(line)
