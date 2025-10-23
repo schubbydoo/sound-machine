@@ -168,6 +168,8 @@ gunicorn -w 2 -b 0.0.0.0:8080 web_interface.backend.wsgi:application
 - Check serial device presence: `ls /dev/ttyACM*`.
 - Test audio output: `aplay -D default /path/to/test.wav`.
 - View logs: `journalctl -u soundtrigger.service -e`.
+- **Communication Issues**: If buttons stop working or Pico drops into REPL mode, use `main_robust.py` firmware instead of `main.py`.
+- **Pico Not Responding**: Test with `python3 daemon/peek_pico.py --port /dev/ttyACM0` - should show button states.
 - See `docs/troubleshooting.md` for more.
 
 
@@ -175,24 +177,31 @@ gunicorn -w 2 -b 0.0.0.0:8080 web_interface.backend.wsgi:application
 Firmware lives in `pico_firmware/`:
 - `boot.py`: minimal boot configuration.
 - `main.py`: implements button scanning, press reporting (`P,<id>`), LED overrides (`L,<id>,0|1`), and background random twinkle for LED buttons 1,7,9,15.
+- `main_robust.py`: **RECOMMENDED** - Robust version that handles interrupts gracefully and prevents communication fragility issues.
+- `main_no_leds.py`: Simplified version without LED management for Picos without LEDs.
+
+### Firmware Versions
+- **`main_robust.py`** (Recommended): Handles KeyboardInterrupt and serial communication interruptions gracefully. This version prevents the Pico from dropping into REPL mode when interrupted by the daemon.
+- **`main.py`**: Original version with LED management. Use only if you have LEDs and need the original functionality.
+- **`main_no_leds.py`**: Simplified version without LED management for Picos without LED hardware.
 
 ### Flashing steps
 1. Download MicroPython UF2 for Pico (RP2040) from `https://micropython.org/download/RPI_PICO/`.
 2. Hold BOOTSEL on the Pico and plug into the Pi; a drive `RPI-RP2` appears.
 3. Copy the UF2 onto `RPI-RP2`. It reboots into MicroPython.
 4. Mount the MicroPython filesystem (appears as a serial REPL on `/dev/ttyACM0`).
-5. Copy `pico_firmware/boot.py` and `pico_firmware/main.py` onto the Pico as `/boot.py` and `/main.py`:
+5. Copy `pico_firmware/boot.py` and `pico_firmware/main_robust.py` onto the Pico as `/boot.py` and `/main.py`:
    ```bash
    # Option A: using mpremote (recommended)
    pip install mpremote
    mpremote connect /dev/ttyACM0 fs cp pico_firmware/boot.py :boot.py
-   mpremote connect /dev/ttyACM0 fs cp pico_firmware/main.py :main.py
+   mpremote connect /dev/ttyACM0 fs cp pico_firmware/main_robust.py :main.py
    mpremote connect /dev/ttyACM0 reset
 
    # Option B: using rshell
    pip install rshell
    rshell -p /dev/ttyACM0 cp pico_firmware/boot.py /pyboard/boot.py
-   rshell -p /dev/ttyACM0 cp pico_firmware/main.py /pyboard/main.py
+   rshell -p /dev/ttyACM0 cp pico_firmware/main_robust.py /pyboard/main.py
    ```
 6. After reset, the Pico should print presses and accept LED overrides.
 
