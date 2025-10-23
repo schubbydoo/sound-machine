@@ -2,6 +2,10 @@
 import json
 import os
 import subprocess
+import shutil
+import tempfile
+import contextlib
+import wave
 from pathlib import Path
 import threading
 import datetime
@@ -49,6 +53,67 @@ def list_wavs(base_dir: Path):
     wavs = [f for f in os.listdir(base_dir) if f.lower().endswith('.wav')]
     wavs.sort(key=str.lower)
     return wavs
+
+
+# ---------------- WAV validation/conversion ----------------
+TARGET_RATE = 48000  # Hz
+TARGET_WIDTH_BYTES = 2  # 16-bit PCM
+
+
+def _have_cmd(cmd: str) -> bool:
+    return shutil.which(cmd) is not None
+
+
+def probe_wav(path: Path) -> dict:
+    """Return basic WAV info or {} on failure."""
+    try:
+        with contextlib.closing(wave.open(str(path), 'rb')) as w:
+            info = {
+                'channels': w.getnchannels(),
+                'sampwidth': w.getsampwidth(),
+                'framerate': w.getframerate(),
+                'nframes': w.getnframes(),
+            }
+            return info
+    except Exception:
+        return {}
+
+
+def needs_conversion(path: Path) -> bool:
+    info = probe_wav(path)
+    if not info:
+        return True
+    if info['sampwidth'] != TARGET_WIDTH_BYTES:
+        return True
+    if info['framerate'] != TARGET_RATE:
+        return True
+    # accept mono or stereo
+    if info['channels'] not in (1, 2):
+        return True
+    return False
+
+
+def convert_wav(src: Path, dst: Path) -> None:
+    """Convert wav to 48kHz 16-bit PCM using sox or ffmpeg."""
+    if _have_cmd('sox'):
+        cmd = [
+            'sox', str(src),
+            '-r', str(TARGET_RATE),
+            '-e', 'signed-integer',
+            '-b', '16',
+            str(dst),
+        ]
+    elif _have_cmd('ffmpeg'):
+        cmd = [
+            'ffmpeg', '-y', '-v', 'error',
+            '-i', str(src),
+            '-ar', str(TARGET_RATE),
+            '-acodec', 'pcm_s16le',
+            str(dst),
+        ]
+    else:
+        raise RuntimeError('Neither sox nor ffmpeg found for WAV conversion')
+    subprocess.check_call(cmd)
 
 
 # ---------------- Wi-Fi helpers ----------------
@@ -571,8 +636,29 @@ def upload():
     name = secure_filename(f.filename)
     if not name.lower().endswith('.wav'):
         return jsonify({'ok': False, 'error': 'Only .wav supported'}), 400
+    base_dir.mkdir(parents=True, exist_ok=True)
     dest = base_dir / name
-    f.save(str(dest))
+    # Save to temp then validate/convert if needed
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp:
+        tmp_path = Path(tmp.name)
+        f.save(str(tmp_path))
+    try:
+        if needs_conversion(tmp_path):
+            try:
+                convert_wav(tmp_path, dest)
+            except Exception as e:
+                # Fallback: if conversion failed but original is okay enough, keep original
+                info = probe_wav(tmp_path)
+                if info:
+                    tmp_path.replace(dest)
+                else:
+                    return jsonify({'ok': False, 'error': f'Conversion failed: {e}'}), 500
+        else:
+            tmp_path.replace(dest)
+    finally:
+        with contextlib.suppress(Exception):
+            if tmp_path.exists():
+                tmp_path.unlink()
     return jsonify({'ok': True, 'name': name})
 
 

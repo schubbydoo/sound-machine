@@ -14,6 +14,7 @@ import signal
 import subprocess
 import sys
 import time
+import threading
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -96,15 +97,7 @@ def resolve_serial_port(preferred: str) -> Optional[str]:
     return None
 
 
-def send_led(ser: serial.Serial, button_id: int, on: bool) -> None:
-    ser.write(f"L,{button_id},{1 if on else 0}\n".encode("ascii"))
-    ser.flush()
-
-
-def clear_led_override(ser: serial.Serial, button_id: int) -> None:
-    # State=2 means "clear override" -> resume background blinking on Pico
-    ser.write(f"L,{button_id},2\n".encode("ascii"))
-    ser.flush()
+# LED functions removed - no LEDs on this switch board
 
 
 def play_wav_interruptible(wav_path: Path, device: str, current_process: Optional[subprocess.Popen], btn_id: int) -> Optional[subprocess.Popen]:
@@ -113,42 +106,110 @@ def play_wav_interruptible(wav_path: Path, device: str, current_process: Optiona
         print(f"WAV not found: {wav_path}", file=sys.stderr)
         return current_process
     
-    # Stop current playback first
+    # Complete audio system reset to prevent race conditions
+    try:
+        # Kill ALL audio processes aggressively
+        subprocess.run(['pkill', '-9', '-f', 'aplay'], capture_output=True, timeout=1)
+        subprocess.run(['pkill', '-9', '-f', 'pulseaudio'], capture_output=True, timeout=1)
+        subprocess.run(['pkill', '-9', '-f', 'sox'], capture_output=True, timeout=1)
+        # Reset ALSA to clear any stuck buffers
+        subprocess.run(['alsactl', 'restore'], capture_output=True, timeout=2)
+        # Wait for system to stabilize
+        time.sleep(0.2)
+    except Exception as e:
+        print(f"Audio cleanup warning: {e}", file=sys.stderr)
+    
+    # Stop current playback with timeout
     if current_process and current_process.poll() is None:
         print(f"STOP: interrupting current playback")
-        current_process.terminate()
         try:
-            current_process.wait(timeout=0.5)
+            current_process.terminate()
+            current_process.wait(timeout=0.1)
         except subprocess.TimeoutExpired:
-            current_process.kill()
-            current_process.wait()
+            try:
+                current_process.kill()
+                current_process.wait(timeout=0.1)
+            except Exception:
+                pass
     
-    # Start new playback
+    # Final cleanup before starting
+    try:
+        subprocess.run(['pkill', '-9', '-f', 'aplay'], capture_output=True, timeout=1)
+        subprocess.run(['pkill', '-9', '-f', 'sox'], capture_output=True, timeout=1)
+        time.sleep(0.1)
+    except Exception:
+        pass
+    
+    # Try multiple approaches to handle different audio formats safely
+    # First try: aplay with format conversion to standard CD quality
+    # This prevents issues with high sample rate files (48kHz -> 44.1kHz)
     cmd = [
         "aplay",
         "-q",
-        "-D",
-        device,
+        "-D", device,
+        "-f", "S16_LE",  # Force 16-bit signed little-endian
+        "-c", "2",       # Force stereo
+        "-r", "44100",   # Force 44.1kHz (CD quality) - prevents 48kHz issues
         str(wav_path),
     ]
+    
     try:
         print(f"PLAY: button={btn_id} file={wav_path} device={device}")
-        return subprocess.Popen(cmd)
-    except FileNotFoundError:
-        print("ERROR: 'aplay' not found. Install 'alsa-utils'.", file=sys.stderr)
+        process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # Verify process started successfully
+        time.sleep(0.1)
+        if process.poll() is not None:
+            print(f"ERROR: aplay with format conversion failed", file=sys.stderr)
+            # Fallback: try without format forcing
+            cmd_fallback = [
+                "aplay",
+                "-q",
+                "-D", device,
+                str(wav_path),
+            ]
+            process = subprocess.Popen(cmd_fallback, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(0.1)
+            if process.poll() is not None:
+                print(f"ERROR: aplay fallback also failed", file=sys.stderr)
+                return current_process
+        return process
+    except Exception as e:
+        print(f"ERROR: Failed to start playback: {e}", file=sys.stderr)
         return current_process
 
 
 def main() -> int:
-    config = load_config(DEFAULT_CONFIG_PATH)
-    profile_cfg = get_active_profile(config)
+    # Global state for configuration reloading
+    config_lock = threading.Lock()
+    current_config = load_config(DEFAULT_CONFIG_PATH)
+    current_profile_cfg = get_active_profile(current_config)
+    current_device_cfg = current_config.get("device", {})
+    current_button_to_wav = build_button_map(current_profile_cfg)
+    
+    def reload_config():
+        """Reload configuration from file"""
+        nonlocal current_config, current_profile_cfg, current_device_cfg, current_button_to_wav
+        try:
+            with config_lock:
+                new_config = load_config(DEFAULT_CONFIG_PATH)
+                new_profile_cfg = get_active_profile(new_config)
+                new_device_cfg = new_config.get("device", {})
+                new_button_to_wav = build_button_map(new_profile_cfg)
+                
+                current_config = new_config
+                current_profile_cfg = new_profile_cfg
+                current_device_cfg = new_device_cfg
+                current_button_to_wav = new_button_to_wav
+                
+                print(f"CONFIG RELOADED: {len(current_button_to_wav)} button mappings")
+        except Exception as e:
+            print(f"Failed to reload config: {e}", file=sys.stderr)
 
-    device_cfg = config.get("device", {})
-    configured_port = device_cfg.get("serial", "/dev/ttyACM0")
-    aplay_device = device_cfg.get("aplayDevice", "default")
+    # Initial configuration
+    configured_port = current_device_cfg.get("serial", "/dev/ttyACM0")
+    aplay_device = current_device_cfg.get("aplayDevice", "default")
 
-    button_to_wav = build_button_map(profile_cfg)
-    if not button_to_wav:
+    if not current_button_to_wav:
         print("No button mappings found. Edit config/mappings.json.", file=sys.stderr)
 
     # Simple state tracking for interruption
@@ -174,11 +235,35 @@ def main() -> int:
     signal.signal(signal.SIGINT, handle_sig)
     signal.signal(signal.SIGTERM, handle_sig)
 
+    # File watcher thread for configuration reloading
+    def watch_config_file():
+        """Watch for changes to the configuration file"""
+        last_mtime = 0
+        while not stop:
+            try:
+                if DEFAULT_CONFIG_PATH.exists():
+                    current_mtime = DEFAULT_CONFIG_PATH.stat().st_mtime
+                    if current_mtime > last_mtime and last_mtime > 0:
+                        print("Configuration file changed, reloading...")
+                        # Add small delay to avoid race conditions with active button presses
+                        time.sleep(0.5)
+                        reload_config()
+                    last_mtime = current_mtime
+                time.sleep(1.0)  # Check every second
+            except Exception as e:
+                print(f"Config watcher error: {e}", file=sys.stderr)
+                time.sleep(5.0)  # Wait longer on error
+
+    # Start config watcher thread
+    watcher_thread = threading.Thread(target=watch_config_file, daemon=True)
+    watcher_thread.start()
+
     current_port: Optional[str] = None
     backoff_s = 0.5
     print(f"Sound trigger daemon starting. ALSA device='{aplay_device}'")
     print(f"Looking for serial port: {configured_port}")
-    print(f"Button mappings: {len(button_to_wav)} buttons configured")
+    print(f"Button mappings: {len(current_button_to_wav)} buttons configured")
+    print("Configuration auto-reload enabled")
     
     while not stop:
         # Ensure we have a serial port
@@ -215,44 +300,25 @@ def main() -> int:
                         continue
                     last_press_ts[btn_id] = now_ms
 
-                    wav_path = button_to_wav.get(btn_id)
+                    # Get current button mapping with thread safety
+                    with config_lock:
+                        wav_path = current_button_to_wav.get(btn_id)
                     if not wav_path:
                         print(f"No mapping for button {btn_id}")
                         continue
 
                     # Handle button press with immediate response
                     try:
-                        # Turn off LED for previous button if any
-                        if current_button is not None:
-                            clear_led_override(ser, current_button)
+                        # Get a snapshot of current config to avoid race conditions
+                        with config_lock:
+                            current_aplay_device = current_device_cfg.get("aplayDevice", "default")
                         
                         # Start new playback (this will interrupt any current playback)
-                        current_process = play_wav_interruptible(wav_path, aplay_device, current_process, btn_id)
+                        current_process = play_wav_interruptible(wav_path, current_aplay_device, current_process, btn_id)
                         current_button = btn_id
-                        
-                        # Turn on LED for this button immediately
-                        send_led(ser, btn_id, True)
-                        
-                        # Simple LED cleanup - check periodically if playback finished
-                        def cleanup_led():
-                            if current_process:
-                                current_process.wait()
-                                try:
-                                    clear_led_override(ser, btn_id)
-                                except Exception:
-                                    pass
-                        
-                        # Start LED cleanup in background
-                        import threading
-                        threading.Thread(target=cleanup_led, daemon=True).start()
                             
                     except Exception as e:
                         print(f"Error handling button {btn_id}: {e}", file=sys.stderr)
-                        # Ensure LED is turned off on error
-                        try:
-                            clear_led_override(ser, btn_id)
-                        except Exception:
-                            pass
         except (serial.SerialException, FileNotFoundError) as exc:
             # Could not open the port; reset and retry
             print(f"Serial open failed on {current_port or configured_port}: {exc}")

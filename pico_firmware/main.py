@@ -22,11 +22,12 @@ BUTTON_PINS = {
 }
 
 # LED GPIOs (subset of buttons)
+# Note: Buttons 9 and 15 LEDs are physically swapped in hardware
 LED_BUTTON_TO_PIN = {
     1: 14,
     7: 15,
-    9: 16,
-    15: 17,
+    9: 17,  # Physical LED for button 9 is on GP17
+    15: 16, # Physical LED for button 15 is on GP16
 }
 
 # Initialize inputs with pull-ups (active-low switches)
@@ -44,7 +45,7 @@ _led_overrides = {btn_id: None for btn_id in LED_BUTTON_TO_PIN}
 # Simple debounce state
 _last_state = {btn_id: 1 for btn_id in buttons}  # start high (unpressed)
 _last_time_ms = {btn_id: 0 for btn_id in buttons}
-DEBOUNCE_MS = 80
+DEBOUNCE_MS = 50  # Reduced for better responsiveness
 
 # Background blinker thread for LEDs not overridden
 def _blink_worker():
@@ -66,10 +67,6 @@ def _blink_worker():
 _thread.start_new_thread(_blink_worker, ())
 
 # Parse LED command lines from host and utility commands
-# Formats:
-# - L,<id>,0|1  -> set LED override off/on
-# - L,<id>,2    -> clear override (return control to background blink)
-# - Q           -> print a single-line state dump of all buttons
 def _handle_line(line: str):
     line = line.strip()
     if not line:
@@ -98,21 +95,18 @@ def _handle_line(line: str):
         except Exception:
             pass
 
-"""Non-blocking host command reader using uselect.poll on USB CDC stdio."""
+# Non-blocking host command reader
 try:
     _poll = uselect.poll()
     _poll.register(sys.stdin, uselect.POLLIN)
 except Exception:
     _poll = None
 
-
 def _read_host_commands():
-    # Attempt to read a few available lines without blocking
     try:
         if not _poll:
             return
-        # Small budget each loop to avoid starving button scan
-        for _ in range(3):
+        for _ in range(2):  # Reduced to avoid blocking
             events = _poll.poll(0)
             if not events:
                 break
@@ -125,6 +119,7 @@ def _read_host_commands():
         pass
 
 # Main loop: scan buttons, report presses
+print("Sound Machine Pico firmware started")
 while True:
     now_ms = time.ticks_ms()
     # Read a potential host command each cycle
@@ -134,8 +129,8 @@ while True:
         state = 1 if pin.value() else 0  # 1=idle(high), 0=pressed(low)
         if state != _last_state[btn_id]:
             _last_state[btn_id] = state
-            if state == 0:
-                # press detected; debounce
+            if state == 0:  # Button pressed
+                # Check debounce
                 if time.ticks_diff(now_ms, _last_time_ms[btn_id]) > DEBOUNCE_MS:
                     _last_time_ms[btn_id] = now_ms
                     # Emit press event
@@ -144,4 +139,4 @@ while True:
                         sys.stdout.flush()
                     except Exception:
                         pass
-    time.sleep_ms(5)
+    time.sleep_ms(10)  # Slightly longer sleep for stability
