@@ -59,21 +59,9 @@ def build_button_map(profile_cfg: Dict[str, Any]) -> Dict[int, Path]:
     return mapping
 
 
-def open_serial(port: str, baudrate: int = 115200, timeout: float = 0.1) -> serial.Serial:
-    """Open serial connection with improved stability settings"""
-    ser = serial.Serial(
-        port=port, 
-        baudrate=baudrate, 
-        timeout=timeout,
-        write_timeout=1.0,
-        inter_byte_timeout=0.1,
-        rtscts=False,  # Disable hardware flow control
-        dsrdtr=False,  # Disable hardware flow control
-        xonxoff=False  # Disable software flow control
-    )
-    # Clear any existing data
-    ser.reset_input_buffer()
-    ser.reset_output_buffer()
+def open_serial(port: str, baudrate: int = 115200, timeout: float = 1.0) -> serial.Serial:
+    """Open serial connection with simple, reliable settings"""
+    ser = serial.Serial(port=port, baudrate=baudrate, timeout=timeout)
     return ser
 
 
@@ -120,42 +108,19 @@ def play_wav_interruptible(wav_path: Path, device: str, current_process: Optiona
         print(f"WAV not found: {wav_path}", file=sys.stderr)
         return current_process
     
-    # Complete audio system reset to prevent race conditions
-    try:
-        # Kill ALL audio processes aggressively
-        subprocess.run(['pkill', '-9', '-f', 'aplay'], capture_output=True, timeout=1)
-        subprocess.run(['pkill', '-9', '-f', 'pulseaudio'], capture_output=True, timeout=1)
-        subprocess.run(['pkill', '-9', '-f', 'sox'], capture_output=True, timeout=1)
-        # Reset ALSA to clear any stuck buffers
-        subprocess.run(['alsactl', 'restore'], capture_output=True, timeout=2)
-        # Wait for system to stabilize
-        time.sleep(0.2)
-    except Exception as e:
-        print(f"Audio cleanup warning: {e}", file=sys.stderr)
-    
-    # Stop current playback with timeout
+    # Simple audio cleanup - only kill the current process
     if current_process and current_process.poll() is None:
-        print(f"STOP: interrupting current playback")
         try:
             current_process.terminate()
             current_process.wait(timeout=0.1)
         except subprocess.TimeoutExpired:
-            try:
-                current_process.kill()
-                current_process.wait(timeout=0.1)
-            except Exception:
-                pass
+            current_process.kill()
+        except Exception:
+            pass
     
-    # Final cleanup before starting
-    try:
-        subprocess.run(['pkill', '-9', '-f', 'aplay'], capture_output=True, timeout=1)
-        subprocess.run(['pkill', '-9', '-f', 'sox'], capture_output=True, timeout=1)
-        time.sleep(0.1)
-    except Exception:
-        pass
+    # Current process cleanup handled above
     
-    # Simple, reliable aplay command without format forcing
-    # Let aplay handle format conversion automatically
+    # Simple, reliable aplay command - files should already be in correct format
     cmd = [
         "aplay",
         "-q",
@@ -165,12 +130,7 @@ def play_wav_interruptible(wav_path: Path, device: str, current_process: Optiona
     
     try:
         print(f"PLAY: button={btn_id} file={wav_path} device={device}")
-        process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        # Verify process started successfully
-        time.sleep(0.1)
-        if process.poll() is not None:
-            print(f"ERROR: aplay failed", file=sys.stderr)
-            return current_process
+        process = subprocess.Popen(cmd)
         return process
     except Exception as e:
         print(f"ERROR: Failed to start playback: {e}", file=sys.stderr)
@@ -215,9 +175,9 @@ def main() -> int:
     current_process: Optional[subprocess.Popen] = None
     current_button: Optional[int] = None
     
-    # Very short debounce for maximum responsiveness
+    # Increased debounce for cheap arcade buttons to prevent rapid-fire presses
     last_press_ts: Dict[int, float] = {}
-    debounce_ms = 50.0  # Increased debounce for cheap arcade buttons
+    debounce_ms = 200.0  # Increased from 50ms to 200ms for better debouncing
 
     stop = False
 
@@ -263,6 +223,13 @@ def main() -> int:
     print(f"Looking for serial port: {configured_port}")
     print(f"Button mappings: {len(current_button_to_wav)} buttons configured")
     print("Configuration auto-reload enabled")
+    
+    # Set audio volume to 100%
+    try:
+        subprocess.run(['amixer', '-c', '0', 'set', 'Speaker', '100%'], capture_output=True, timeout=2)
+        print("Audio volume set to 100%")
+    except Exception as e:
+        print(f"Could not set audio volume: {e}")
     
     while not stop:
         # Ensure we have a serial port

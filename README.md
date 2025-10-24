@@ -153,10 +153,12 @@ gunicorn -w 2 -b 0.0.0.0:8080 web_interface.backend.wsgi:application
 
 ## Performance Features
 - **Sound Interruption**: New button presses immediately stop current playback for responsive switching
-- **Optimized Debouncing**: 20ms debounce window for maximum responsiveness
+- **Optimized Debouncing**: 200ms debounce window for reliable operation with cheap arcade buttons
 - **Rapid Button Handling**: System handles rapid button mashing without getting confused
 - **LED Management**: Proper LED feedback with background cleanup
 - **Kid-Friendly**: Designed to handle enthusiastic button pressing without lockups
+- **Simplified Audio**: Direct ALSA access without audio server conflicts for maximum reliability
+- **Automatic Volume**: Volume automatically set to 100% on startup
 
 ## Notes on Latency
 - Use WAV (PCM) files and `aplay` for minimal startup overhead.
@@ -170,10 +172,14 @@ gunicorn -w 2 -b 0.0.0.0:8080 web_interface.backend.wsgi:application
 - View logs: `journalctl -u soundtrigger.service -e`.
 - **Communication Issues**: If buttons stop working or Pico drops into REPL mode, use `main_robust.py` firmware instead of `main.py`.
 - **Pico Not Responding**: Test with `python3 daemon/peek_pico.py --port /dev/ttyACM0` - should show button states.
-- **Audio Format Errors**: If you see "Sample format non available" errors, the daemon now uses simplified aplay commands that handle format conversion automatically.
-- **Cheap Arcade Buttons**: The system now uses 50ms debouncing to handle multiple presses from cheap arcade buttons.
-- **Serial Stability**: Improved serial communication with better timeouts and error handling for disconnections.
+- **Audio Format Errors**: The daemon uses simplified aplay commands - files should already be in correct format (16-bit PCM WAV).
+- **Cheap Arcade Buttons**: The system uses 200ms debouncing to handle multiple presses from cheap arcade buttons reliably.
+- **Serial Stability**: Simplified serial communication with reliable settings for stable operation.
 - **Pico Reset**: If the Pico stops responding, send reset commands: `python3 -c "import serial; ser=serial.Serial('/dev/ttyACM0', 115200); ser.write(b'\x03\x04'); ser.close()"`
+- **Service Not Working After Code Changes**: After updating the daemon code, restart the service: `sudo systemctl restart soundtrigger.service`
+- **Service Status Check**: Check if the service is running: `sudo systemctl status soundtrigger.service`
+- **No Sound Output**: Volume is automatically set to 100% on startup. If issues persist, check: `amixer -c 0`
+- **Audio Conflicts**: The system uses direct ALSA access for maximum reliability. No audio servers (PipeWire/PulseAudio) are needed.
 - See `docs/troubleshooting.md` for more.
 
 
