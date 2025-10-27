@@ -24,11 +24,16 @@ except Exception as exc:  # pragma: no cover
     print(f"ERROR: pyserial is required: {exc}", file=sys.stderr)
     sys.exit(1)
 
+# LED daemon communication via named pipe
+LED_FIFO = Path("/tmp/sound_led_events")
+
 PRESS_RE = re.compile(r"^P,(\d{1,2})\s*$")
 
 DEFAULT_CONFIG_PATH = Path(
     os.environ.get("SOUND_MACHINE_CONFIG", "/home/soundconsole/sound-machine/config/mappings.json")
 )
+
+# No event file needed - direct function calls
 
 
 def load_config(config_path: Path) -> Dict[str, Any]:
@@ -102,23 +107,80 @@ def resolve_serial_port(preferred: str) -> Optional[str]:
 # LED functions removed - no LEDs on this switch board
 
 
+def check_audio_device(device: str) -> bool:
+    """Check if audio device is available"""
+    try:
+        # Quick check: try to query the device
+        result = subprocess.run(
+            ["aplay", "-l"],
+            capture_output=True,
+            text=True,
+            timeout=1.0
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def send_button_event_to_led_daemon(btn_id: int) -> None:
+    """Send button press event to LED daemon via named pipe"""
+    def write_to_led_fifo():
+        try:
+            if LED_FIFO.exists():
+                # Try opening the FIFO for writing with a timeout
+                # Use non-blocking mode first to check if reader is ready
+                try:
+                    fd = os.open(str(LED_FIFO), os.O_WRONLY | os.O_NONBLOCK)
+                    os.write(fd, f"{btn_id}\n".encode())
+                    os.close(fd)
+                except (BlockingIOError, OSError):
+                    # Reader might not be ready - try one blocking attempt
+                    # If this hangs, the daemon thread will still exit when soundtrigger exits
+                    try:
+                        with open(str(LED_FIFO), 'w') as fifo:
+                            fifo.write(f"{btn_id}\n")
+                            fifo.flush()
+                    except (OSError, BrokenPipeError):
+                        pass  # LED daemon not listening
+        except Exception:
+            # Any other error - silently ignore
+            pass
+    
+    # Start write in background thread so it never blocks the main audio daemon thread
+    t = threading.Thread(target=write_to_led_fifo, daemon=True)
+    t.start()
+
+
 def play_wav_interruptible(wav_path: Path, device: str, current_process: Optional[subprocess.Popen], btn_id: int) -> Optional[subprocess.Popen]:
     """Play a WAV file, interrupting any current playback."""
     if not wav_path.exists():
         print(f"WAV not found: {wav_path}", file=sys.stderr)
-        return current_process
+        return None
     
-    # Simple audio cleanup - only kill the current process
-    if current_process and current_process.poll() is None:
+    # Check if audio device is available before attempting playback
+    if not check_audio_device(device):
+        print(f"ERROR: Audio device '{device}' not available", file=sys.stderr)
+        return None
+    
+    # Force kill any stuck process aggressively
+    if current_process:
+        # Check if it's been running too long (stuck)
         try:
-            current_process.terminate()
-            current_process.wait(timeout=0.1)
-        except subprocess.TimeoutExpired:
-            current_process.kill()
-        except Exception:
-            pass
-    
-    # Current process cleanup handled above
+            # Try to see if it's responding
+            if current_process.poll() is None:
+                # Process still running - check if it's stuck
+                try:
+                    current_process.terminate()
+                    current_process.wait(timeout=0.5)  # Give it half a second
+                except subprocess.TimeoutExpired:
+                    # Process is stuck - kill it aggressively
+                    print(f"WARN: Killing stuck audio process", file=sys.stderr)
+                    current_process.kill()
+                    current_process.wait(timeout=0.5)
+                except Exception as e:
+                    print(f"WARN: Error killing process: {e}", file=sys.stderr)
+        except Exception as e:
+            print(f"WARN: Error checking process: {e}", file=sys.stderr)
     
     # Simple, reliable aplay command - files should already be in correct format
     cmd = [
@@ -130,16 +192,24 @@ def play_wav_interruptible(wav_path: Path, device: str, current_process: Optiona
     
     try:
         print(f"PLAY: button={btn_id} file={wav_path} device={device}")
-        process = subprocess.Popen(cmd)
+        process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # Check if process started successfully
+        time.sleep(0.1)  # Brief check
+        if process.poll() is not None:
+            print(f"ERROR: aplay exited immediately", file=sys.stderr)
+            return None
+        
         return process
     except Exception as e:
         print(f"ERROR: Failed to start playback: {e}", file=sys.stderr)
-        return current_process
+        return None
 
 
 def main() -> int:
     # Global state for configuration reloading
     config_lock = threading.Lock()
+    
+    # Load initial configuration
     current_config = load_config(DEFAULT_CONFIG_PATH)
     current_profile_cfg = get_active_profile(current_config)
     current_device_cfg = current_config.get("device", {})
@@ -167,6 +237,16 @@ def main() -> int:
     # Initial configuration
     configured_port = current_device_cfg.get("serial", "/dev/ttyACM0")
     aplay_device = current_device_cfg.get("aplayDevice", "default")
+    
+    # Initialize LED controller if available - DISABLED
+    # LED code appears to cause crashes - keeping disabled for now
+    # if led_controller:
+    #     try:
+    #         led_gpio = current_device_cfg.get("ledGPIO", {})
+    #         if led_gpio:
+    #             led_controller.init(led_gpio)
+    #     except Exception as e:
+    #         print(f"LED initialization failed (LEDs will not work): {e}")
 
     if not current_button_to_wav:
         print("No button mappings found. Edit config/mappings.json.", file=sys.stderr)
@@ -178,6 +258,15 @@ def main() -> int:
     # Increased debounce for cheap arcade buttons to prevent rapid-fire presses
     last_press_ts: Dict[int, float] = {}
     debounce_ms = 200.0  # Increased from 50ms to 200ms for better debouncing
+    
+    def cleanup_debounce_dict():
+        """Remove old entries from debounce dict to prevent memory growth"""
+        nonlocal last_press_ts
+        current_time = time.time() * 1000.0
+        # Remove entries older than 60 seconds
+        keys_to_remove = [k for k, v in last_press_ts.items() if (current_time - v) > 60000.0]
+        for k in keys_to_remove:
+            last_press_ts.pop(k, None)
 
     stop = False
 
@@ -216,6 +305,25 @@ def main() -> int:
     # Start config watcher thread
     watcher_thread = threading.Thread(target=watch_config_file, daemon=True)
     watcher_thread.start()
+    
+    # Audio device health monitor thread
+    def monitor_audio_device():
+        """Periodically check if audio device is still available"""
+        last_check = time.time()
+        while not stop:
+            try:
+                # Check every 2 seconds
+                if time.time() - last_check >= 2.0:
+                    if not check_audio_device(aplay_device):
+                        print(f"WARN: Audio device '{aplay_device}' disappeared", file=sys.stderr)
+                    last_check = time.time()
+                time.sleep(0.5)
+            except Exception as e:
+                print(f"Audio monitor error: {e}", file=sys.stderr)
+                time.sleep(2.0)
+    
+    audio_monitor_thread = threading.Thread(target=monitor_audio_device, daemon=True)
+    audio_monitor_thread.start()
 
     current_port: Optional[str] = None
     backoff_s = 0.5
@@ -270,6 +378,10 @@ def main() -> int:
                     if (now_ms - last_ms) < debounce_ms:
                         continue
                     last_press_ts[btn_id] = now_ms
+                    
+                    # Cleanup debounce dict periodically to prevent memory growth
+                    if len(last_press_ts) > 20:
+                        cleanup_debounce_dict()
 
                     # Get current button mapping with thread safety
                     with config_lock:
@@ -277,7 +389,7 @@ def main() -> int:
                     if not wav_path:
                         print(f"No mapping for button {btn_id}")
                         continue
-
+                    
                     # Handle button press with immediate response
                     try:
                         # Get a snapshot of current config to avoid race conditions
@@ -287,6 +399,7 @@ def main() -> int:
                         # Start new playback (this will interrupt any current playback)
                         current_process = play_wav_interruptible(wav_path, current_aplay_device, current_process, btn_id)
                         current_button = btn_id
+                        send_button_event_to_led_daemon(btn_id) # Send LED event immediately
                             
                     except Exception as e:
                         print(f"Error handling button {btn_id}: {e}", file=sys.stderr)

@@ -2,7 +2,14 @@
   "activeProfile": "effects",
   "device": {
     "serial": "/dev/ttyACM0",
-    "aplayDevice": "plughw:0,0"
+    "aplayDevice": "plughw:0,0",
+    "ledGPIO": {
+      "white": 22,
+      "green": 27,
+      "red": 4,
+      "blue": 17,
+      "yellow": 23
+    }
   },
   "profiles": {
     "effects": {
@@ -14,7 +21,7 @@
         15
       ],
       "buttons": {
-        "1": "RedrumShining.wav",
+        "1": "ComeUpToTheLab.wav",
         "2": "TheyreBackPolterguise.wav",
         "3": "Church Bells.wav",
         "4": "Crow Calls.wav",

@@ -34,12 +34,16 @@ Low-latency wired sound machine using a Raspberry Pi Pico (RP2040) for 16 button
 sound-machine/
 ├─ README.md
 ├─ daemon/
-│  ├─ soundtrigger.py          # Main daemon (Pico->play WAV->LED override)
-│  └─ peek_pico.py             # Simple test for presses + LED override
+│  ├─ soundtrigger.py          # Main daemon (Pico->play WAV->LED via FIFO)
+│  ├─ led_daemon.py            # LED control daemon (reads button events from FIFO)
+│  ├─ peek_pico.py             # Simple test for presses + LED override
+│  ├─ test_leds.py             # LED blinking test script
+│  └─ test_events.py           # Button event simulation script
 ├─ config/
 │  └─ mappings.json            # Profiles + button->file mapping
 ├─ systemd/
-│  └─ soundtrigger.service     # Systemd unit to autostart the daemon
+│  ├─ soundtrigger.service     # Systemd unit to autostart the daemon
+│  └─ led_daemon.service       # Systemd unit to autostart the LED daemon
 ├─ Sounds/
 │  ├─ effects/                 # WAV files for "effects" profile
 │  └─ trivia/                  # WAV files for "trivia" profile (optional)
@@ -150,6 +154,67 @@ gunicorn -w 2 -b 0.0.0.0:8080 web_interface.backend.wsgi:application
 ## Systemd Service
 - Unit file at `systemd/soundtrigger.service` starts the daemon at boot.
 - It sets `SOUND_MACHINE_CONFIG` to point at `config/mappings.json`.
+
+## LED Daemon (`led_daemon.py`)
+The system includes an optional **independent LED daemon** that controls LEDs based on button presses.
+
+### Features
+- **Modular Design**: Runs as a separate daemon, independent from audio playback
+- **Low-Latency Feedback**: LEDs start blinking immediately when a button is pressed
+- **Reliable Communication**: Uses named pipes (FIFO) for inter-process communication with the audio daemon
+- **Graceful Degradation**: System works perfectly even if LED daemon isn't running
+- **Auto-Timeout**: LEDs automatically stop after 20 seconds of inactivity
+- **GPIO Emulation**: Works in simulation mode if GPIO library isn't available
+
+### Button-to-LED Color Pairs
+Each button maps to a unique pair of LED colors that blink randomly:
+```
+Button 1:  red/yellow        Button 9:  blue/yellow
+Button 2:  red/blue          Button 10: blue/red
+Button 3:  red/green         Button 11: blue/green
+Button 4:  red/white         Button 12: blue/white
+Button 5:  red/yellow        Button 13: white/yellow
+Button 6:  red/blue          Button 14: green/yellow
+Button 7:  red/green         Button 15: white/green
+Button 8:  red/white         Button 16: white/red
+```
+
+### GPIO Pin Configuration
+Edit `led_daemon.py` to set your GPIO pins or use environment variables:
+```python
+LED_PINS = {
+    "white": int(os.environ.get("LED_WHITE", "22")),
+    "green": int(os.environ.get("LED_GREEN", "27")),
+    "red": int(os.environ.get("LED_RED", "4")),
+    "blue": int(os.environ.get("LED_BLUE", "17")),
+    "yellow": int(os.environ.get("LED_YELLOW", "23")),
+}
+```
+
+### Running the LED Daemon
+```bash
+# Manual execution
+python3 daemon/led_daemon.py
+
+# Or enable as a systemd service (optional)
+sudo cp systemd/led_daemon.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now led_daemon.service
+sudo systemctl status led_daemon.service
+```
+
+### How It Works
+1. **Audio daemon** (`soundtrigger.py`) reads button presses from the Pico
+2. **Button event** is sent to named pipe at `/tmp/sound_led_events`
+3. **LED daemon** receives the button ID and looks up the color pair
+4. **LEDs blink** with a random alternating pattern until:
+   - A new button is pressed (switches to new color pair), or
+   - 20 seconds of inactivity pass (LEDs turn off)
+
+### Communication Protocol
+- **Named Pipe**: `/tmp/sound_led_events` (FIFO)
+- **Message Format**: Single button ID per line (e.g., `"1\n"`, `"13\n"`)
+- **Non-blocking**: Audio daemon never waits for LED daemon
 
 ## Performance Features
 - **Sound Interruption**: New button presses immediately stop current playback for responsive switching
