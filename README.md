@@ -15,6 +15,7 @@ Low-latency wired sound machine using a Raspberry Pi Pico (RP2040) for 16 button
 - **Audio**: USB DAC on the Pi (WAV files for minimal start latency)
 - **Latency target**: <30–50 ms button→sound using warmed ALSA and WAV
 - **Sound Interruption**: New button presses immediately stop current playback
+- **LED Feedback**: Glass skull LED lights respond to button presses and audio playback
 - **Web Interface**: Full-featured web UI with navigation, WiFi, and Bluetooth management
 
 ## Hardware Summary
@@ -22,8 +23,9 @@ Low-latency wired sound machine using a Raspberry Pi Pico (RP2040) for 16 button
   - Buttons 1–12 → GP2..GP13
   - Buttons 13–16 → GP18..GP21
   - GND daisy-chained across all switches
-- **LED buttons**: 1, 7, 9, 15
-  - LED GPIOs on Pico: GP14, GP15, GP16, GP17 (≈330 Ω series to LED anodes; cathodes to GND)
+- **LED Control**: GPIO 18 (BCM) on Raspberry Pi Zero (physical pin 12)
+  - Provides PWM signal to control LED switch circuit
+  - Single wire + ground connection
 - **Pi Zero 2W**: 4-port USB hat (Pico + USB DAC connected)
 - **Pico firmware protocol**:
   - Sends: `P,<id>\n` on press
@@ -34,23 +36,34 @@ Low-latency wired sound machine using a Raspberry Pi Pico (RP2040) for 16 button
 sound-machine/
 ├─ README.md
 ├─ daemon/
-│  ├─ soundtrigger.py          # Main daemon (Pico->play WAV->LED via FIFO)
-│  ├─ led_daemon.py            # LED control daemon (reads button events from FIFO)
+│  ├─ soundtrigger.py          # Main daemon (Pico->play WAV->LED signal)
+│  ├─ led_daemon.py            # LED control daemon (PWM pulsing + flashing)
 │  ├─ peek_pico.py             # Simple test for presses + LED override
 │  ├─ test_leds.py             # LED blinking test script
 │  └─ test_events.py           # Button event simulation script
 ├─ config/
 │  └─ mappings.json            # Profiles + button->file mapping
 ├─ systemd/
-│  ├─ soundtrigger.service     # Systemd unit to autostart the daemon
-│  └─ led_daemon.service       # Systemd unit to autostart the LED daemon
+│  ├─ soundtrigger.service     # Systemd unit to autostart audio daemon
+│  └─ sound-led-daemon.service # Systemd unit to autostart LED daemon
 ├─ Sounds/
 │  ├─ effects/                 # WAV files for "effects" profile
 │  └─ trivia/                  # WAV files for "trivia" profile (optional)
 ├─ web_interface/              # Optional web UI (backend/frontend)
-└─ docs/
-   ├─ wiring.md                # Pin map, LED wiring, photos
-   └─ troubleshooting.md       # Common issues
+├─ docs/
+│  ├─ wiring.md                # Pin map, LED wiring, photos
+│  ├─ troubleshooting.md       # Common issues
+│  ├─ LED_CONTROL.md           # Detailed LED system documentation
+│  ├─ GPIO_PINOUT.md           # GPIO reference and wiring guide
+│  ├─ LED_QUICK_START.txt      # LED quick start guide
+│  ├─ LED_IMPLEMENTATION_SUMMARY.md # Implementation details
+│  ├─ CHANGES_SUMMARY.txt      # Summary of changes
+│  └─ IMPLEMENTATION_COMPLETE.md # Implementation status
+└─ pico_firmware/
+   ├─ boot.py
+   ├─ main.py
+   ├─ main_robust.py
+   └─ main_no_leds.py
 ```
 
 ## Quick Start (Pi Zero 2W)
@@ -73,16 +86,17 @@ sound-machine/
    ```bash
    python3 daemon/peek_pico.py --port /dev/ttyACM0
    ```
-7. Run the daemon manually for a quick test:
+7. Run the daemons manually for a quick test:
    ```bash
+   # Terminal 1: LED daemon
+   python3 daemon/led_daemon.py
+   
+   # Terminal 2: Audio daemon
    python3 daemon/soundtrigger.py
    ```
-8. Install as a service (optional):
+8. Install as systemd services (recommended for auto-start on boot):
    ```bash
-   sudo cp systemd/soundtrigger.service /etc/systemd/system/
-   sudo systemctl daemon-reload
-   sudo systemctl enable --now soundtrigger.service
-   sudo systemctl status soundtrigger.service
+   sudo ./SETUP_SYSTEMD.sh
    ```
 
 ## Configuration (`config/mappings.json`)
@@ -90,7 +104,6 @@ sound-machine/
 - **device.serial**: serial device path for Pico (e.g., `/dev/ttyACM0`).
 - **device.aplayDevice**: ALSA device for `aplay` (e.g., `plughw:0,0` for USB DAC).
 - **profiles[<name>].baseDir**: absolute path to profile sound directory.
-- **profiles[<name>].ledButtons**: array of button IDs that have LEDs.
 - **profiles[<name>].buttons**: map of button ID → WAV filename (relative to `baseDir`).
 
 Example template:
@@ -104,7 +117,6 @@ Example template:
   "profiles": {
     "effects": {
       "baseDir": "/home/soundconsole/sound-machine/Sounds/effects",
-      "ledButtons": [1, 7, 9, 15],
       "buttons": {
         "1": "sample1.wav",
         "2": "sample2.wav",
@@ -126,7 +138,6 @@ Example template:
     },
     "trivia": {
       "baseDir": "/home/soundconsole/sound-machine/Sounds/trivia",
-      "ledButtons": [1, 7, 9, 15],
       "buttons": {}
     }
   }
@@ -151,76 +162,78 @@ pip install flask gunicorn
 gunicorn -w 2 -b 0.0.0.0:8080 web_interface.backend.wsgi:application
 ```
 
-## Systemd Service
-- Unit file at `systemd/soundtrigger.service` starts the daemon at boot.
-- It sets `SOUND_MACHINE_CONFIG` to point at `config/mappings.json`.
+## Systemd Services
+Two systemd units manage auto-start on boot:
 
-## LED Daemon (`led_daemon.py`)
-The system includes an optional **independent LED daemon** that controls LEDs based on button presses.
+- `systemd/sound-led-daemon.service`: Starts LED control daemon (auto-restarts on failure)
+- `systemd/soundtrigger.service`: Starts audio daemon (auto-restarts on failure)
 
-### Features
-- **Modular Design**: Runs as a separate daemon, independent from audio playback
-- **Low-Latency Feedback**: LEDs start blinking immediately when a button is pressed
-- **Reliable Communication**: Uses named pipes (FIFO) for inter-process communication with the audio daemon
-- **Graceful Degradation**: System works perfectly even if LED daemon isn't running
-- **Auto-Timeout**: LEDs automatically stop after 20 seconds of inactivity
-- **GPIO Emulation**: Works in simulation mode if GPIO library isn't available
+### Setup
+```bash
+# Automated setup (recommended)
+sudo ./SETUP_SYSTEMD.sh
 
-### Button-to-LED Color Pairs
-Each button maps to a unique pair of LED colors that blink randomly:
-```
-Button 1:  red/yellow        Button 9:  blue/yellow
-Button 2:  red/blue          Button 10: blue/red
-Button 3:  red/green         Button 11: blue/green
-Button 4:  red/white         Button 12: blue/white
-Button 5:  red/yellow        Button 13: white/yellow
-Button 6:  red/blue          Button 14: green/yellow
-Button 7:  red/green         Button 15: white/green
-Button 8:  red/white         Button 16: white/red
+# Or manual setup
+sudo cp systemd/sound-led-daemon.service /etc/systemd/system/
+sudo cp systemd/soundtrigger.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now sound-led-daemon.service
+sudo systemctl enable --now soundtrigger.service
 ```
 
-### GPIO Pin Configuration
-Edit `led_daemon.py` to set your GPIO pins or use environment variables:
-```python
-LED_PINS = {
-    "white": int(os.environ.get("LED_WHITE", "22")),
-    "green": int(os.environ.get("LED_GREEN", "27")),
-    "red": int(os.environ.get("LED_RED", "4")),
-    "blue": int(os.environ.get("LED_BLUE", "17")),
-    "yellow": int(os.environ.get("LED_YELLOW", "23")),
-}
+### Service Management
+```bash
+# Check status
+systemctl status sound-led-daemon.service
+systemctl status soundtrigger.service
+
+# View logs
+journalctl -u sound-led-daemon.service -f
+journalctl -u soundtrigger.service -f
+
+# Restart
+sudo systemctl restart sound-led-daemon.service
+sudo systemctl restart soundtrigger.service
 ```
+
+## LED Control System
+
+### Overview
+The system includes a sophisticated **autonomous LED daemon** that provides real-time visual feedback:
+
+- **Idle State**: Smooth PWM pulsing (5-second breathing cycle) when no buttons pressed
+- **Button Press**: Rapid LED flashing (100ms on/off) when audio is playing
+- **Button Interrupt**: Flash sequence restarts if new button pressed before audio finishes
+- **Audio Complete**: LEDs automatically return to idle pulsing when audio stops
+
+### Hardware
+- **GPIO Pin**: 18 (BCM numbering) = Pin 12 on GPIO header
+- **Connection**: Single wire to LED circuit + ground
+- **PWM Support**: Enables smooth brightness transitions
+
+### For Detailed LED Documentation
+See the comprehensive LED documentation:
+- **Quick Start**: `docs/LED_QUICK_START.txt`
+- **Full Details**: `docs/LED_CONTROL.md`
+- **GPIO Reference**: `docs/GPIO_PINOUT.md`
+- **Implementation Details**: `docs/LED_IMPLEMENTATION_SUMMARY.md`
 
 ### Running the LED Daemon
 ```bash
 # Manual execution
 python3 daemon/led_daemon.py
 
-# Or enable as a systemd service (optional)
-sudo cp systemd/led_daemon.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now led_daemon.service
-sudo systemctl status led_daemon.service
+# Or via systemd (recommended)
+sudo systemctl start sound-led-daemon.service
+sudo systemctl status sound-led-daemon.service
 ```
-
-### How It Works
-1. **Audio daemon** (`soundtrigger.py`) reads button presses from the Pico
-2. **Button event** is sent to named pipe at `/tmp/sound_led_events`
-3. **LED daemon** receives the button ID and looks up the color pair
-4. **LEDs blink** with a random alternating pattern until:
-   - A new button is pressed (switches to new color pair), or
-   - 20 seconds of inactivity pass (LEDs turn off)
-
-### Communication Protocol
-- **Named Pipe**: `/tmp/sound_led_events` (FIFO)
-- **Message Format**: Single button ID per line (e.g., `"1\n"`, `"13\n"`)
-- **Non-blocking**: Audio daemon never waits for LED daemon
 
 ## Performance Features
 - **Sound Interruption**: New button presses immediately stop current playback for responsive switching
 - **Optimized Debouncing**: 200ms debounce window for reliable operation with cheap arcade buttons
+- **LED Feedback**: Real-time visual feedback with PWM pulsing and flashing
 - **Rapid Button Handling**: System handles rapid button mashing without getting confused
-- **LED Management**: Proper LED feedback with background cleanup
+- **Autonomous Operation**: LED daemon runs independently, works even if audio daemon crashes
 - **Kid-Friendly**: Designed to handle enthusiastic button pressing without lockups
 - **Simplified Audio**: Direct ALSA access without audio server conflicts for maximum reliability
 - **Automatic Volume**: Volume automatically set to 100% on startup
@@ -246,7 +259,6 @@ sudo systemctl status led_daemon.service
 - **No Sound Output**: Volume is automatically set to 100% on startup. If issues persist, check: `amixer -c 0`
 - **Audio Conflicts**: The system uses direct ALSA access for maximum reliability. No audio servers (PipeWire/PulseAudio) are needed.
 - See `docs/troubleshooting.md` for more.
-
 
 ## Pico Firmware (MicroPython)
 Firmware lives in `pico_firmware/`:
@@ -316,11 +328,8 @@ PY
   python3 daemon/soundtrigger.py
   ```
 
-
 ### ALSA device selection
 - List devices: `aplay -l`
 - Try `plughw:<card>,<device>` for the USB DAC, e.g., `plughw:0,0`.
 - Set `device.aplayDevice` in `config/mappings.json` accordingly.
 - If HDMI is default, force the USB DAC by using `-D plughw:0,0`.
-
-# sound-machine

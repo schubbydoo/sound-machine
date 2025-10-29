@@ -1,7 +1,7 @@
 [Unit]
 Description=Sound Machine trigger daemon (Pico -> WAV -> LED)
-After=network.target sound.target
-Wants=sound.target
+After=network.target sound.target sound-led-daemon.service
+Wants=sound.target sound-led-daemon.service
 
 [Service]
 Type=simple

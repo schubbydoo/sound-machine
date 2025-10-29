@@ -151,6 +151,11 @@ def send_button_event_to_led_daemon(btn_id: int) -> None:
     t.start()
 
 
+def send_led_stop_signal() -> None:
+    """Send stop signal (button ID 0) to LED daemon to stop flashing"""
+    send_button_event_to_led_daemon(0)
+
+
 def play_wav_interruptible(wav_path: Path, device: str, current_process: Optional[subprocess.Popen], btn_id: int) -> Optional[subprocess.Popen]:
     """Play a WAV file, interrupting any current playback."""
     if not wav_path.exists():
@@ -324,6 +329,34 @@ def main() -> int:
     
     audio_monitor_thread = threading.Thread(target=monitor_audio_device, daemon=True)
     audio_monitor_thread.start()
+
+    # Audio playback monitor thread - watches for when audio finishes and sends LED stop signal
+    def monitor_audio_playback():
+        """Monitor the current audio process and send LED stop signal when it finishes"""
+        nonlocal current_process, current_button
+        last_signaled_process_id = None
+        while not stop:
+            try:
+                # Check if we have an active process that just finished
+                if current_process and current_process.poll() is not None:
+                    # Process has exited - send stop signal to LED daemon (only once per process)
+                    current_process_id = id(current_process)
+                    if last_signaled_process_id != current_process_id:
+                        print(f"PLAY_END: Audio finished for button {current_button}")
+                        send_led_stop_signal()
+                        last_signaled_process_id = current_process_id
+                else:
+                    # Process is still running or None - reset the signal tracker
+                    # This allows sending a signal when the NEXT process finishes
+                    if current_process:
+                        last_signaled_process_id = None
+                time.sleep(0.1)  # Check frequently for immediate response
+            except Exception as e:
+                print(f"Playback monitor error: {e}", file=sys.stderr)
+                time.sleep(0.5)
+    
+    playback_monitor_thread = threading.Thread(target=monitor_audio_playback, daemon=True)
+    playback_monitor_thread.start()
 
     current_port: Optional[str] = None
     backoff_s = 0.5

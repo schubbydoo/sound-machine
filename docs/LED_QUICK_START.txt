@@ -1,0 +1,138 @@
+================================================================================
+                      LED CONTROL - QUICK START GUIDE
+================================================================================
+
+HARDWARE SETUP
+==============
+
+1. Locate GPIO 18 (Pin 12) on the Raspberry Pi Zero GPIO header
+2. Connect GPIO 18 → LED switch signal input
+3. Connect GND (Pin 9) → LED circuit ground
+4. That's it! Single signal wire + ground
+
+                    GPIO Header
+                    ┌───────────┐
+                    │ Pin 1-10  │
+            GND → │ Pin 9 GND  │
+         Signal → │ Pin 12 (GPIO 18) │
+                    │ Pin 11-40 │
+                    └───────────┘
+
+
+TESTING
+=======
+
+Quick test without hardware (simulation mode):
+  1. Open terminal 1:
+     cd /home/soundconsole/sound-machine
+     python3 daemon/led_daemon.py
+
+  2. Open terminal 2:
+     echo "1" > /tmp/sound_led_events  # Should print "FLASHING"
+     sleep 2
+     echo "0" > /tmp/sound_led_events  # Should print "IDLE"
+
+
+FULL SYSTEM TEST (After wiring)
+================================
+
+  Terminal 1 - LED Daemon:
+    python3 daemon/led_daemon.py
+
+  Terminal 2 - Audio Daemon:
+    python3 daemon/soundtrigger.py
+
+  Then:
+    - Press buttons on Pico → LEDs should flash rapidly
+    - After audio ends → LEDs should return to slow pulsing
+    - Press another button → Flash should restart
+    - When idle → Should see smooth pulsing effect
+
+
+LED BEHAVIOR
+============
+
+  IDLE (No button pressed):
+    - Smooth pulsing: off → bright → off in 5 seconds
+    - Repeats continuously
+    - Signals "I'm ready"
+
+  BUTTON PRESSED:
+    - Rapid on/off flashing (100ms each)
+    - Continues until audio finishes
+    - Shows immediate feedback
+
+  INTERRUPT (New button before audio ends):
+    - Flash sequence RESTARTS from the beginning
+    - Provides clear visual feedback of new action
+
+
+CUSTOMIZATION
+==============
+
+To use different GPIO pin:
+  export LED_GPIO=12     # Use GPIO 12 instead
+  python3 daemon/led_daemon.py
+
+To adjust pulsing (edit daemon/led_daemon.py):
+  PULSE_CYCLE_SECONDS = 5.0     # How long for one pulse (seconds)
+  IDLE_MIN_PWM = 20             # Minimum brightness (0-100%)
+  IDLE_MAX_PWM = 100            # Maximum brightness (0-100%)
+
+To adjust flashing (edit daemon/led_daemon.py):
+  FLASH_ON_MS = 100             # On duration (milliseconds)
+  FLASH_OFF_MS = 100            # Off duration (milliseconds)
+
+
+TROUBLESHOOTING
+================
+
+Q: "GPIO not available - simulation mode"
+A: Normal if not on Raspberry Pi. Daemon still works for testing.
+
+Q: LEDs not responding when button pressed
+A: 1. Check both daemons are running
+   2. Verify GPIO wiring
+   3. Try: ls -la /tmp/sound_led_events (should exist)
+
+Q: Pulsing looks jerky
+A: Edit daemon/led_daemon.py, in _idle_pulsing_loop():
+   Change: time.sleep(0.05) 
+   To:     time.sleep(0.02)  # More frequent PWM updates
+
+
+DOCUMENTATION
+==============
+
+For detailed information, see:
+  - LED_IMPLEMENTATION_SUMMARY.md  (overview of changes)
+  - docs/LED_CONTROL.md             (complete documentation)
+  - docs/GPIO_PINOUT.md             (GPIO reference)
+
+
+QUICK REFERENCE
+================
+
+GPIO 18 = Pin 12 on header
+GND = Pin 9 on header
+
+Default PWM configuration:
+  - Idle: 5-second cycle, 20-100% brightness
+  - Flash: 100ms on, 100ms off
+  - Interrupt: Restart flash sequence
+
+Signal protocol:
+  - Button ID (1-16) → Start/restart flashing
+  - Button ID (0) → Stop flashing, return to idle
+
+
+NEXT STEPS
+==========
+
+1. Wire GPIO 18 and GND to LED circuit
+2. Test in simulation mode (no hardware needed)
+3. Test with actual hardware
+4. Adjust timings if needed
+5. Optional: Set up systemd service for auto-start
+
+================================================================================
