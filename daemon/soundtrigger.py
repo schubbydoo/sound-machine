@@ -64,7 +64,7 @@ def build_button_map(profile_cfg: Dict[str, Any]) -> Dict[int, Path]:
     return mapping
 
 
-def open_serial(port: str, baudrate: int = 115200, timeout: float = 1.0) -> serial.Serial:
+def open_serial(port: str, baudrate: int = 115200, timeout: float = 0.5) -> serial.Serial:
     """Open serial connection with simple, reliable settings"""
     ser = serial.Serial(port=port, baudrate=baudrate, timeout=timeout)
     return ser
@@ -381,68 +381,82 @@ def main() -> int:
                     time.sleep(backoff_s)
                     backoff_s = min(backoff_s * 1.5, 5.0)
                     continue
-                print(f"Opening serial: {current_port}")
-            with open_serial(current_port) as ser:
-                print("Serial open; trigger loop ready.")
-                backoff_s = 0.5
-                while not stop:
-                    try:
-                        line = ser.readline().decode("ascii", errors="ignore")
-                    except (serial.SerialException, OSError) as e:
-                        # Device likely disconnected; break to outer to re-open
-                        print(f"Serial exception ({e}); will re-open.")
-                        break
-                    except Exception as e:
-                        print(f"Unexpected serial error ({e}); will re-open.")
-                        break
-                    
-                    if line:
-                        sys.stdout.write(f"SER:{line}")
-                        sys.stdout.flush()  # Ensure output is flushed
-                    if not line:
-                        continue
-                    m = PRESS_RE.match(line)
-                    if not m:
-                        continue
-
-                    btn_id = int(m.group(1))
-                    now_ms = time.time() * 1000.0
-                    last_ms = last_press_ts.get(btn_id, 0.0)
-                    if (now_ms - last_ms) < debounce_ms:
-                        continue
-                    last_press_ts[btn_id] = now_ms
-                    
-                    # Cleanup debounce dict periodically to prevent memory growth
-                    if len(last_press_ts) > 20:
-                        cleanup_debounce_dict()
-
-                    # Get current button mapping with thread safety
-                    with config_lock:
-                        wav_path = current_button_to_wav.get(btn_id)
-                    if not wav_path:
-                        print(f"No mapping for button {btn_id}")
-                        continue
-                    
-                    # Handle button press with immediate response
-                    try:
-                        # Get a snapshot of current config to avoid race conditions
-                        with config_lock:
-                            current_aplay_device = current_device_cfg.get("aplayDevice", "default")
+                print(f"Opening serial: {current_port}", flush=True)
+            try:
+                with open_serial(current_port) as ser:
+                    print("Serial open; trigger loop ready.", flush=True)
+                    backoff_s = 0.5
+                    while not stop:
+                        try:
+                            line = ser.readline().decode("ascii", errors="ignore")
+                        except (serial.SerialException, OSError) as e:
+                            # Device likely disconnected; break to outer to re-open
+                            print(f"Serial exception ({e}); will re-open.", flush=True)
+                            current_port = None  # Force re-open attempt
+                            break
+                        except Exception as e:
+                            print(f"Unexpected serial error ({e}); will re-open.", flush=True)
+                            current_port = None  # Force re-open attempt
+                            break
                         
-                        # Start new playback (this will interrupt any current playback)
-                        current_process = play_wav_interruptible(wav_path, current_aplay_device, current_process, btn_id)
-                        current_button = btn_id
-                        send_button_event_to_led_daemon(btn_id) # Send LED event immediately
+                        if line:
+                            sys.stdout.write(f"SER:{line}")
+                            sys.stdout.flush()  # Ensure output is flushed
+                        if not line:
+                            continue
+                        m = PRESS_RE.match(line)
+                        if not m:
+                            continue
+
+                        btn_id = int(m.group(1))
+                        now_ms = time.time() * 1000.0
+                        last_ms = last_press_ts.get(btn_id, 0.0)
+                        if (now_ms - last_ms) < debounce_ms:
+                            continue
+                        last_press_ts[btn_id] = now_ms
+                        
+                        # Cleanup debounce dict periodically to prevent memory growth
+                        if len(last_press_ts) > 20:
+                            cleanup_debounce_dict()
+
+                        # Get current button mapping with thread safety
+                        with config_lock:
+                            wav_path = current_button_to_wav.get(btn_id)
+                        if not wav_path:
+                            print(f"No mapping for button {btn_id}")
+                            continue
+                        
+                        # Handle button press with immediate response
+                        try:
+                            # Get a snapshot of current config to avoid race conditions
+                            with config_lock:
+                                current_aplay_device = current_device_cfg.get("aplayDevice", "default")
                             
-                    except Exception as e:
-                        print(f"Error handling button {btn_id}: {e}", file=sys.stderr)
-        except (serial.SerialException, FileNotFoundError) as exc:
-            # Could not open the port; reset and retry
-            print(f"Serial open failed on {current_port or configured_port}: {exc}")
-        # Reset to force re-resolve next iteration
+                            # Start new playback (this will interrupt any current playback)
+                            current_process = play_wav_interruptible(wav_path, current_aplay_device, current_process, btn_id)
+                            current_button = btn_id
+                            send_button_event_to_led_daemon(btn_id) # Send LED event immediately
+                                
+                        except Exception as e:
+                            print(f"Error handling button {btn_id}: {e}", file=sys.stderr, flush=True)
+            except (serial.SerialException, FileNotFoundError) as exc:
+                # Could not open the port; reset and retry
+                print(f"Serial open failed on {current_port or configured_port}: {exc}", flush=True)
+                backoff_s = min(backoff_s * 1.5, 5.0)
+            except Exception as e:
+                print(f"Unexpected error in serial handling: {e}", file=sys.stderr, flush=True)
+                import traceback
+                traceback.print_exc(file=sys.stderr)
+                backoff_s = min(backoff_s * 1.5, 5.0)
+        except Exception as e:
+            print(f"Unexpected error in main daemon loop: {e}", file=sys.stderr, flush=True)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+            backoff_s = min(backoff_s * 1.5, 5.0)
+        
+        # ALWAYS reset port after each iteration to force fresh connection
         current_port = None
         time.sleep(backoff_s)
-        backoff_s = min(backoff_s * 1.5, 5.0)
 
     print("Exiting.")
     if current_process and current_process.poll() is None:

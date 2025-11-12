@@ -626,40 +626,46 @@ def play(button_id: int):
 
 @app.post('/upload')
 def upload():
-    cfg = load_config()
-    _, __, base_dir = get_effects_mapping(cfg)
-    if 'file' not in request.files:
-        return jsonify({'ok': False, 'error': 'No file'}), 400
-    f = request.files['file']
-    if not f or not f.filename:
-        return jsonify({'ok': False, 'error': 'Empty filename'}), 400
-    name = secure_filename(f.filename)
-    if not name.lower().endswith('.wav'):
-        return jsonify({'ok': False, 'error': 'Only .wav supported'}), 400
-    base_dir.mkdir(parents=True, exist_ok=True)
-    dest = base_dir / name
-    # Save to temp then validate/convert if needed
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp:
-        tmp_path = Path(tmp.name)
-        f.save(str(tmp_path))
     try:
-        if needs_conversion(tmp_path):
-            try:
-                convert_wav(tmp_path, dest)
-            except Exception as e:
-                # Fallback: if conversion failed but original is okay enough, keep original
-                info = probe_wav(tmp_path)
-                if info:
-                    tmp_path.replace(dest)
-                else:
-                    return jsonify({'ok': False, 'error': f'Conversion failed: {e}'}), 500
-        else:
-            tmp_path.replace(dest)
-    finally:
-        with contextlib.suppress(Exception):
-            if tmp_path.exists():
-                tmp_path.unlink()
-    return jsonify({'ok': True, 'name': name})
+        cfg = load_config()
+        _, __, base_dir = get_effects_mapping(cfg)
+        if 'file' not in request.files:
+            return jsonify({'ok': False, 'error': 'No file'}), 400
+        f = request.files['file']
+        if not f or not f.filename:
+            return jsonify({'ok': False, 'error': 'Empty filename'}), 400
+        name = secure_filename(f.filename)
+        if not name.lower().endswith('.wav'):
+            return jsonify({'ok': False, 'error': 'Only .wav supported'}), 400
+        base_dir.mkdir(parents=True, exist_ok=True)
+        dest = base_dir / name
+        # Save to temp then validate/convert if needed
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp:
+            tmp_path = Path(tmp.name)
+            f.save(str(tmp_path))
+        try:
+            if needs_conversion(tmp_path):
+                try:
+                    convert_wav(tmp_path, dest)
+                except Exception as e:
+                    # Fallback: if conversion failed but original is okay enough, keep original
+                    info = probe_wav(tmp_path)
+                    if info:
+                        shutil.move(str(tmp_path), str(dest))
+                    else:
+                        return jsonify({'ok': False, 'error': f'Conversion failed: {e}'}), 500
+            else:
+                shutil.move(str(tmp_path), str(dest))
+        finally:
+            with contextlib.suppress(Exception):
+                if tmp_path.exists():
+                    tmp_path.unlink()
+        return jsonify({'ok': True, 'name': name})
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        print(f"Upload error: {e}\n{tb}", flush=True)
+        return jsonify({'ok': False, 'error': f'Upload error: {str(e)}'}), 500
 
 
 @app.post('/delete')

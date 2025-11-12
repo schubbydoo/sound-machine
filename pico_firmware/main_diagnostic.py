@@ -1,13 +1,13 @@
 # Diagnostic MicroPython firmware for Sound Machine (Pico)
-# - Shows GPIO states for all button pins
-# - Helps debug wiring issues
+# - Check GPIO states without requiring button presses
+# - Useful for verifying the Pico works before wiring buttons
 
 import time
 from machine import Pin
 
-print("Sound Machine Pico DIAGNOSTIC firmware starting...")
+print("Sound Machine Pico firmware starting (diagnostic version)...")
 
-# Button GPIOs
+# Button GPIOs - just initialize as inputs to test
 BUTTON_PINS = {
     1: 2,  2: 3,  3: 4,  4: 5,
     5: 6,  6: 7,  7: 8,  8: 9,
@@ -15,44 +15,44 @@ BUTTON_PINS = {
     13: 18, 14: 19, 15: 20, 16: 21,
 }
 
-# Initialize inputs with pull-ups (active-low switches)
-buttons = {btn_id: Pin(gpio, Pin.IN, Pin.PULL_UP) for btn_id, gpio in BUTTON_PINS.items()}
+print(f"Initializing {len(BUTTON_PINS)} GPIO pins...")
+try:
+    buttons = {}
+    for btn_id, gpio in BUTTON_PINS.items():
+        try:
+            pin = Pin(gpio, Pin.IN, Pin.PULL_UP)
+            buttons[btn_id] = pin
+            print(f"  ✓ Button {btn_id:2d} on GPIO {gpio:2d} initialized")
+        except Exception as e:
+            print(f"  ✗ Button {btn_id:2d} on GPIO {gpio:2d} FAILED: {e}")
+    print(f"Successfully initialized {len(buttons)}/{len(BUTTON_PINS)} pins")
+except Exception as e:
+    print(f"Initialization error: {e}")
+    import sys
+    sys.exit(1)
 
-print("Button mapping:")
-for btn_id, gpio in BUTTON_PINS.items():
-    print(f"  Button {btn_id} -> GPIO {gpio}")
-
-print("GPIO states (1=idle/high, 0=pressed/low):")
-print("Press buttons to see state changes...")
+print("\nRunning GPIO state monitor...")
+print("(This test will show GPIO values. Press Ctrl+C to stop)\n")
 
 loop_count = 0
-last_states = {btn_id: 1 for btn_id in buttons}
-
-while True:
-    try:
-        # Check all button states
-        current_states = {}
-        for btn_id, pin in buttons.items():
-            current_states[btn_id] = 1 if pin.value() else 0
-        
-        # Print state changes
-        for btn_id in buttons:
-            if current_states[btn_id] != last_states[btn_id]:
-                print(f"Button {btn_id}: {last_states[btn_id]} -> {current_states[btn_id]}")
-                last_states[btn_id] = current_states[btn_id]
-        
-        # Print all states every 100 loops (every 2 seconds)
+try:
+    while True:
         loop_count += 1
-        if loop_count % 100 == 0:
-            states_str = " ".join([f"{btn_id}:{current_states[btn_id]}" for btn_id in sorted(buttons.keys())])
-            print(f"States: {states_str}")
         
-        time.sleep_ms(20)  # 50Hz polling
-            
-    except KeyboardInterrupt:
-        print("KeyboardInterrupt caught, continuing...")
-        continue
-    except Exception as e:
-        print(f"Error in main loop: {e}")
-        time.sleep_ms(100)
-        continue
+        # Every 50 loops (~1 second), print status
+        if loop_count % 50 == 0:
+            states = []
+            for btn_id in sorted(buttons.keys()):
+                pin = buttons[btn_id]
+                val = pin.value()
+                states.append(f"{btn_id}:{val}")
+            print(f"Loop {loop_count:6d}: {' '.join(states)}")
+        
+        time.sleep_ms(20)
+        
+except KeyboardInterrupt:
+    print("\nDiagnostic stopped by user")
+except Exception as e:
+    print(f"Runtime error: {e}")
+    import traceback
+    traceback.print_exc()
