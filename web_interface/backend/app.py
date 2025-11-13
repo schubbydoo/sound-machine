@@ -660,6 +660,14 @@ def upload():
             with contextlib.suppress(Exception):
                 if tmp_path.exists():
                     tmp_path.unlink()
+        
+        # Ensure file is readable by the daemon
+        try:
+            import stat
+            os.chmod(str(dest), stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
+        except Exception as e:
+            print(f"Warning: Could not set file permissions: {e}", flush=True)
+        
         return jsonify({'ok': True, 'name': name})
     except Exception as e:
         import traceback

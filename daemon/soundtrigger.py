@@ -360,10 +360,7 @@ def main() -> int:
 
     current_port: Optional[str] = None
     backoff_s = 0.5
-    print(f"Sound trigger daemon starting. ALSA device='{aplay_device}'")
-    print(f"Looking for serial port: {configured_port}")
-    print(f"Button mappings: {len(current_button_to_wav)} buttons configured")
-    print("Configuration auto-reload enabled")
+    print(f"Sound trigger daemon starting.", flush=True)
     
     # Set audio volume to 100%
     try:
@@ -372,91 +369,91 @@ def main() -> int:
     except Exception as e:
         print(f"Could not set audio volume: {e}")
     
+    ser = None
     while not stop:
-        # Ensure we have a serial port
+        # Ensure we have a serial connection
         try:
-            if not current_port:
+            if not ser or not current_port:
                 current_port = resolve_serial_port(configured_port)
                 if not current_port:
                     time.sleep(backoff_s)
                     backoff_s = min(backoff_s * 1.5, 5.0)
                     continue
                 print(f"Opening serial: {current_port}", flush=True)
+                ser = open_serial(current_port)
+                print("Serial open; trigger loop ready.", flush=True)
+                backoff_s = 0.5
+            
             try:
-                with open_serial(current_port) as ser:
-                    print("Serial open; trigger loop ready.", flush=True)
-                    backoff_s = 0.5
-                    while not stop:
-                        try:
-                            line = ser.readline().decode("ascii", errors="ignore")
-                        except (serial.SerialException, OSError) as e:
-                            # Device likely disconnected; break to outer to re-open
-                            print(f"Serial exception ({e}); will re-open.", flush=True)
-                            current_port = None  # Force re-open attempt
-                            break
-                        except Exception as e:
-                            print(f"Unexpected serial error ({e}); will re-open.", flush=True)
-                            current_port = None  # Force re-open attempt
-                            break
-                        
-                        if line:
-                            sys.stdout.write(f"SER:{line}")
-                            sys.stdout.flush()  # Ensure output is flushed
-                        if not line:
-                            continue
-                        m = PRESS_RE.match(line)
-                        if not m:
-                            continue
+                print(f"[ENTERING INNER LOOP] stop={stop}", flush=True)
+                while not stop:
+                    print(f"[INNER LOOP] waiting for data... stop={stop}", flush=True)
+                    try:
+                        line = ser.readline().decode("ascii", errors="ignore")
+                    except (serial.SerialException, OSError) as e:
+                        # Device likely disconnected; break to reconnect
+                        print(f"[SERIAL ERROR] {e}", flush=True)
+                        ser = None
+                        current_port = None
+                        break
+                    except UnicodeDecodeError as e:
+                        # Garbled data, skip this line
+                        continue
+                    except Exception as e:
+                        print(f"[UNEXPECTED ERROR] {type(e).__name__}: {e}", flush=True)
+                        import traceback
+                        traceback.print_exc()
+                        ser = None
+                        current_port = None
+                        break
+                    
+                    if not line:
+                        continue
+                    
+                    m = PRESS_RE.match(line)
+                    if not m:
+                        continue
 
-                        btn_id = int(m.group(1))
-                        now_ms = time.time() * 1000.0
-                        last_ms = last_press_ts.get(btn_id, 0.0)
-                        if (now_ms - last_ms) < debounce_ms:
-                            continue
-                        last_press_ts[btn_id] = now_ms
-                        
-                        # Cleanup debounce dict periodically to prevent memory growth
-                        if len(last_press_ts) > 20:
-                            cleanup_debounce_dict()
+                    btn_id = int(m.group(1))
+                    now_ms = time.time() * 1000.0
+                    last_ms = last_press_ts.get(btn_id, 0.0)
+                    if (now_ms - last_ms) < debounce_ms:
+                        continue
+                    last_press_ts[btn_id] = now_ms
+                    
+                    if len(last_press_ts) > 20:
+                        cleanup_debounce_dict()
 
-                        # Get current button mapping with thread safety
+                    with config_lock:
+                        wav_path = current_button_to_wav.get(btn_id)
+                    if not wav_path:
+                        continue
+                    
+                    try:
                         with config_lock:
-                            wav_path = current_button_to_wav.get(btn_id)
-                        if not wav_path:
-                            print(f"No mapping for button {btn_id}")
-                            continue
-                        
-                        # Handle button press with immediate response
-                        try:
-                            # Get a snapshot of current config to avoid race conditions
-                            with config_lock:
-                                current_aplay_device = current_device_cfg.get("aplayDevice", "default")
-                            
-                            # Start new playback (this will interrupt any current playback)
-                            current_process = play_wav_interruptible(wav_path, current_aplay_device, current_process, btn_id)
-                            current_button = btn_id
-                            send_button_event_to_led_daemon(btn_id) # Send LED event immediately
-                                
-                        except Exception as e:
-                            print(f"Error handling button {btn_id}: {e}", file=sys.stderr, flush=True)
-            except (serial.SerialException, FileNotFoundError) as exc:
-                # Could not open the port; reset and retry
-                print(f"Serial open failed on {current_port or configured_port}: {exc}", flush=True)
-                backoff_s = min(backoff_s * 1.5, 5.0)
+                            current_aplay_device = current_device_cfg.get("aplayDevice", "default")
+                        current_process = play_wav_interruptible(wav_path, current_aplay_device, current_process, btn_id)
+                        current_button = btn_id
+                        send_button_event_to_led_daemon(btn_id)
+                    except Exception as e:
+                        print(f"Error playing button {btn_id}: {e}", file=sys.stderr, flush=True)
+            
             except Exception as e:
-                print(f"Unexpected error in serial handling: {e}", file=sys.stderr, flush=True)
-                import traceback
-                traceback.print_exc(file=sys.stderr)
-                backoff_s = min(backoff_s * 1.5, 5.0)
-        except Exception as e:
-            print(f"Unexpected error in main daemon loop: {e}", file=sys.stderr, flush=True)
-            import traceback
-            traceback.print_exc(file=sys.stderr)
-            backoff_s = min(backoff_s * 1.5, 5.0)
+                print(f"Inner loop error: {e}", flush=True)
+                ser = None
+                current_port = None
+                time.sleep(1)
         
-        # ALWAYS reset port after each iteration to force fresh connection
-        current_port = None
-        time.sleep(backoff_s)
+        except Exception as e:
+            print(f"Outer loop error: {e}", flush=True)
+            if ser:
+                try:
+                    ser.close()
+                except:
+                    pass
+                ser = None
+            current_port = None
+            time.sleep(backoff_s)
 
     print("Exiting.")
     if current_process and current_process.poll() is None:
@@ -469,4 +466,13 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        print("Interrupted.", flush=True)
+        sys.exit(0)
+    except Exception as e:
+        print(f"FATAL ERROR: {e}", file=sys.stderr, flush=True)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        sys.exit(1)
