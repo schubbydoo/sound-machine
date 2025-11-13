@@ -244,25 +244,37 @@ sudo systemctl status sound-led-daemon.service
 - Consider a dedicated USB DAC and set `device.aplayDevice` accordingly.
 - Optimized daemon with sound interruption achieves <30-50ms button→sound latency.
 
-## Recent Fixes (v2024.11)
+## Recent Fixes (v2024.11.2)
+
+### Audio File Standardization
+- **Critical Fix**: All audio files now standardized to **44.1kHz** (device's native rate)
+  - USB audio device (C-Media) supports both 44.1kHz and 48kHz, but 44.1kHz is native
+  - Files at mismatched sample rates were causing static/corruption
+  - All uploaded and existing files converted to 44.1kHz for clean playback
+  - **No more static on audio playback!**
+
+### Daemon Rewrite - Minimal Version
+- **New**: `soundtrigger_minimal.py` replaces the complex original daemon
+  - Stripped down to essential functionality: read serial → interrupt audio → play sound
+  - No configuration reload threads, no LED signals, no complex exception handling
+  - **Immediate audio interruption**: New button presses stop current audio instantly (great for kids)
+  - Memory footprint: ~2.7MB vs ~13MB for original daemon
+  - Much more stable and responsive
+
+### Memory & System Optimization
+- **Increased swap**: From 1.4GB to 2.4GB for better memory management on Pi Zero 2W
+- **Adjusted systemd restart**: RestartSec increased to 5 seconds to prevent rapid reconnect crashes
+- **Reduced logging**: Eliminated verbose debug output to free system resources
 
 ### Web Interface Upload
-- **Fixed**: WAV file upload functionality now works correctly
-  - Added missing `name="file"` attribute to file input
-  - Fixed cross-device link error by using `shutil.move()` instead of `Path.replace()`
+- Fixed missing `name="file"` attribute on file input
+- Fixed cross-device link error by using `shutil.move()`
 
-### Daemon Stability
-- **Improved**: Serial communication error handling with better logging
-  - Reduced serial timeout from 1.0s to 0.5s for faster response
-  - Added comprehensive exception handling to catch and log errors
-  - Fixed critical indentation bug in button processing loop (was outside while loop)
-  - Added `flush=True` to all print statements for immediate log visibility
-  - Serial port now properly resets after each iteration for robust reconnection
-
-### Pico Firmware
-- `main_simple.py`: Minimal firmware for buttons only (no LEDs)
-- `main_diagnostic.py`: Diagnostic version for troubleshooting GPIO initialization
-- `main_safe.py`: Alternative GPIO mapping that avoids GPIO 2-3 (used for internal flash)
+### Pico Firmware Versions
+- `main_ultra_simple.py`: Ultra-minimal (11 lines), bulletproof button scanning
+- `main_watchdog.py`: Includes 8-second watchdog timer for auto-recovery
+- `main_simple.py`: Clean, simple version
+- `main_diagnostic.py`: For troubleshooting GPIO initialization
 
 ## Troubleshooting
 - Check serial device presence: `ls /dev/ttyACM*`.

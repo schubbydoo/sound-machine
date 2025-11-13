@@ -34,20 +34,33 @@ def load_config():
     
     return mapping, aplay_device
 
-def play_sound(file_path, device):
-    """Play a WAV file"""
+def play_sound(file_path, device, current_process):
+    """Play a WAV file, interrupting any current playback"""
     if not file_path.exists():
-        return False
+        return None
+    
+    # Kill previous playback if it's still running
+    if current_process and current_process.poll() is None:
+        try:
+            current_process.terminate()
+            current_process.wait(timeout=0.5)
+        except:
+            try:
+                current_process.kill()
+            except:
+                pass
+    
     try:
-        subprocess.run(
+        # Start new playback
+        process = subprocess.Popen(
             ['aplay', '-q', '-D', device, str(file_path)],
-            timeout=60,
-            check=False
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
         )
-        return True
+        return process
     except Exception as e:
         print(f"Error playing {file_path}: {e}", file=sys.stderr)
-        return False
+        return None
 
 def main():
     print("Sound Machine Minimal Daemon Starting", flush=True)
@@ -62,6 +75,7 @@ def main():
     # Main loop
     import serial
     last_press = {}
+    current_process = None
     
     while True:
         try:
@@ -93,7 +107,7 @@ def main():
                     file_path = button_mapping.get(btn_id)
                     if file_path:
                         print(f"Button {btn_id}: {file_path.name}", flush=True)
-                        play_sound(file_path, aplay_device)
+                        current_process = play_sound(file_path, aplay_device, current_process)
         
         except serial.SerialException:
             print("Serial disconnected, reconnecting...", flush=True)
