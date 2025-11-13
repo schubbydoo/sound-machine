@@ -3,7 +3,7 @@
 Minimal Sound Machine trigger daemon
 - Read button presses from Pico serial
 - Play WAV files
-- No configuration reload, no LED signals, no threads
+- Signal LED daemon when buttons pressed
 """
 import json
 import os
@@ -11,12 +11,33 @@ import re
 import sys
 import time
 import subprocess
+import threading
 from pathlib import Path
 
 # Configuration
 CONFIG_PATH = Path("/home/soundconsole/sound-machine/config/mappings.json")
 SERIAL_PORT = "/dev/ttyACM0"
 BUTTON_REGEX = re.compile(r"^P,(\d{1,2})\s*$")
+LED_FIFO = Path("/tmp/sound_led_events")
+
+def send_to_led_daemon(btn_id):
+    """Send button event to LED daemon in background thread"""
+    def write_led():
+        try:
+            if LED_FIFO.exists():
+                with open(str(LED_FIFO), 'w') as f:
+                    f.write(f"{btn_id}\n")
+                    f.flush()
+        except:
+            pass
+    
+    # Don't block the main loop waiting for LED daemon
+    t = threading.Thread(target=write_led, daemon=True)
+    t.start()
+
+def send_led_stop_signal():
+    """Send stop signal (button ID 0) to LED daemon"""
+    send_to_led_daemon(0)
 
 def load_config():
     """Load button mappings"""
@@ -72,6 +93,29 @@ def main():
         print(f"Failed to load config: {e}", file=sys.stderr)
         return 1
     
+    # Playback monitor thread - watches audio process and sends LED stop when it finishes
+    def monitor_playback():
+        nonlocal current_process
+        last_process_id = None
+        while True:
+            try:
+                if current_process and current_process.poll() is not None:
+                    # Audio finished - send stop signal to LED daemon
+                    process_id = id(current_process)
+                    if last_process_id != process_id:
+                        send_led_stop_signal()
+                        last_process_id = process_id
+                else:
+                    # Audio still playing - reset tracker for next audio
+                    if current_process:
+                        last_process_id = None
+                time.sleep(0.1)
+            except:
+                time.sleep(0.1)
+    
+    monitor_thread = threading.Thread(target=monitor_playback, daemon=True)
+    monitor_thread.start()
+    
     # Main loop
     import serial
     last_press = {}
@@ -107,6 +151,7 @@ def main():
                     file_path = button_mapping.get(btn_id)
                     if file_path:
                         print(f"Button {btn_id}: {file_path.name}", flush=True)
+                        send_to_led_daemon(btn_id)  # Signal LED daemon
                         current_process = play_sound(file_path, aplay_device, current_process)
         
         except serial.SerialException:
