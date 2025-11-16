@@ -27,7 +27,7 @@ except ImportError:
 EVENT_FIFO = Path("/tmp/sound_led_events")
 
 # LED GPIO pin - single pin controls the LED switch
-LED_GPIO_PIN = int(os.environ.get("LED_GPIO", "18"))
+LED_GPIO_PIN = int(os.environ.get("LED_GPIO", "13"))
 
 # Pulsing configuration
 PULSE_CYCLE_SECONDS = 5.0  # Full cycle: off -> bright -> off
