@@ -21,6 +21,8 @@ echo "  - Copying sound-led-daemon.service"
 cp "$PROJECT_DIR/systemd/sound-led-daemon.service" /etc/systemd/system/
 echo "  - Copying soundtrigger.service"
 cp "$PROJECT_DIR/systemd/soundtrigger.service" /etc/systemd/system/
+echo "  - Copying sound-channel-monitor.service"
+cp "$PROJECT_DIR/systemd/sound-channel-monitor.service" /etc/systemd/system/
 
 echo ""
 echo "Step 2: Reloading systemd daemon..."
@@ -30,12 +32,14 @@ echo ""
 echo "Step 3: Enabling services to start on boot..."
 systemctl enable sound-led-daemon.service
 systemctl enable soundtrigger.service
+systemctl enable sound-channel-monitor.service
 
 echo ""
 echo "Step 4: Starting services now..."
 systemctl start sound-led-daemon.service
 sleep 1
 systemctl start soundtrigger.service
+systemctl start sound-channel-monitor.service
 
 echo ""
 echo "Step 5: Verifying services..."
@@ -44,6 +48,9 @@ systemctl status sound-led-daemon.service --no-pager || true
 echo ""
 echo "  Audio Daemon status:"
 systemctl status soundtrigger.service --no-pager || true
+echo ""
+echo "  Channel Monitor status:"
+systemctl status sound-channel-monitor.service --no-pager || true
 
 echo ""
 echo "=========================================="

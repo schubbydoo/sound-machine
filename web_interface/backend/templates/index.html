@@ -3,8 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Sound Machine</title>
+  <title>Sound Machine Manager</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+  <script defer src="https://use.fontawesome.com/releases/v5.15.4/js/all.js"></script>
+  <style>
+    .audio-row { align-items: center; }
+    .is-clickable { cursor: pointer; }
+    .channel-badge { margin-left: 0.5rem; }
+  </style>
 </head>
 <body>
 <nav class="navbar is-primary" role="navigation" aria-label="main navigation">
@@ -15,138 +21,335 @@
   </div>
   <div class="navbar-menu">
     <div class="navbar-start">
-      <a class="navbar-item" href="/">
-        Home
-      </a>
-      <a class="navbar-item" href="/wifi">
-        Wi-Fi
-      </a>
-      <a class="navbar-item" href="/bt">
-        Bluetooth
-      </a>
+      <a class="navbar-item is-active" href="/">Home</a>
+      <a class="navbar-item" href="/wifi">Wi-Fi</a>
+      <a class="navbar-item" href="/bt">Bluetooth</a>
     </div>
   </div>
 </nav>
 
 <section class="section">
   <div class="container">
-    <h1 class="title">Sound Machine</h1>
-    <p class="subtitle">ALSA device: {{ aplay_device }}</p>
-
+    
+    <!-- Profile Management -->
     <div class="box">
-      <form id="uploadForm" onsubmit="return uploadFile(event)">
-        <div class="field has-addons">
-          <div class="control is-expanded">
-            <input class="input" type="file" id="file" name="file" accept=".wav" required>
-          </div>
-          <div class="control">
-            <button class="button is-primary" type="submit">Upload WAV</button>
-          </div>
+        <h2 class="title is-4">Profile Management</h2>
+        <div class="level">
+            <div class="level-left">
+                <div class="level-item">
+                    <div class="field has-addons">
+                        <div class="control">
+                            <div class="select">
+                                <select id="profileSelect" onchange="switchProfile(this.value)">
+                                    {% for p in profiles %}
+                                    <option value="{{ p.id }}" {% if p.id == active_profile_id %}selected{% endif %}>
+                                        {{ p.name }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                        <div class="control">
+                            <button class="button" onclick="renameProfile()">
+                                <span class="icon is-small"><i class="fas fa-edit"></i></span>
+                            </button>
+                        </div>
+                        <div class="control">
+                            <button class="button is-danger is-light" onclick="deleteProfile()">
+                                <span class="icon is-small"><i class="fas fa-trash"></i></span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="level-item">
+                    <button class="button is-success is-light" onclick="createProfile()">
+                        <span class="icon"><i class="fas fa-plus"></i></span>
+                        <span>New Profile</span>
+                    </button>
+                </div>
+            </div>
+            <div class="level-right">
+                <div class="level-item">
+                    <div class="field has-addons">
+                        <div class="control">
+                            <a class="button is-static">Assigned Channel</a>
+                        </div>
+                        <div class="control">
+                            <div class="select">
+                                <select id="channelSelect" onchange="assignChannel(this.value)">
+                                    <option value="">None</option>
+                                    {% for i in range(1, 5) %}
+                                    <option value="{{ i }}" 
+                                        {% if channels[i] == active_profile_id %}selected{% endif %}
+                                        {% if channels[i] and channels[i] != active_profile_id %}disabled{% endif %}>
+                                        Channel {{ i }} {% if channels[i] and channels[i] != active_profile_id %}(Busy){% endif %}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="level-item">
+                    <a class="button is-info" href="/print_key/{{ active_profile_id }}" target="_blank">
+                        <span class="icon"><i class="fas fa-print"></i></span>
+                        <span>Print Answer Key</span>
+                    </a>
+                </div>
+            </div>
         </div>
-      </form>
-      <div class="content">
-        <p><strong>Files:</strong></p>
-        <div class="tags" id="fileList">
-          {% for f in files %}
-            <span class="tag is-light">
-              {{ f }}
-              <button class="delete is-small" onclick="delFile('{{ f }}')"></button>
-            </span>
-          {% endfor %}
-        </div>
-      </div>
     </div>
 
+    <!-- Bulk Upload -->
     <div class="box">
-      <div class="level">
-        <div class="level-left">
-          <div class="level-item">
-            <button class="button is-success" onclick="saveAll()">Save All Assignments</button>
-          </div>
-        </div>
-      </div>
-      <table class="table is-fullwidth is-striped is-hoverable">
-        <thead>
-          <tr>
-            <th>Button</th>
-            <th>Current</th>
-            <th>Assign</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for e in mapping %}
-          <tr>
-            <td>{{ e.id }}</td>
-            <td>{% if e.name %}<code>{{ e.name }}</code>{% else %}<em>Unassigned</em>{% endif %}{% if e.name and not e.exists %} <span class="tag is-danger is-light">Missing</span>{% endif %}</td>
-            <td>
-              <div class="select is-small">
-                <select id="sel{{ e.id }}">
-                  <option value="">— Unassigned —</option>
-                  {% for f in files %}
-                    <option value="{{ f }}" {% if e.name == f %}selected{% endif %}>{{ f }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-            </td>
-            <td>
-              <button class="button is-small is-info" onclick="assignOne({{ e.id }})">Assign</button>
-              <button class="button is-small is-link is-light" onclick="play({{ e.id }})" {% if not e.exists %}disabled{% endif %}>Play</button>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+        <h2 class="title is-4">Upload Audio</h2>
+        <form id="uploadForm" onsubmit="return uploadFiles(event)">
+            <input type="hidden" name="profile_id" value="{{ active_profile_id }}">
+            <div class="field is-horizontal">
+                <div class="field-body">
+                    <div class="field">
+                        <div class="file has-name is-fullwidth">
+                            <label class="file-label">
+                                <input class="file-input" type="file" name="file" multiple accept=".wav" id="fileInput">
+                                <span class="file-cta">
+                                    <span class="file-icon"><i class="fas fa-upload"></i></span>
+                                    <span class="file-label">Choose files...</span>
+                                </span>
+                                <span class="file-name" id="fileName">No file chosen</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="field has-addons">
+                        <div class="control">
+                            <a class="button is-static">Auto-Assign from Button</a>
+                        </div>
+                        <div class="control">
+                            <input class="input" type="number" name="auto_assign_start" min="1" max="16" placeholder="Optional">
+                        </div>
+                        <div class="control">
+                            <button class="button is-primary" type="submit">Upload</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </form>
     </div>
+
+    <!-- Button Mappings -->
+    <div class="box">
+        <h2 class="title is-4">Button Assignments</h2>
+        <div class="table-container">
+            <table class="table is-fullwidth is-striped is-hoverable">
+                <thead>
+                    <tr>
+                        <th width="50">#</th>
+                        <th>Assigned Audio</th>
+                        <th>Description / Category</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for i in range(1, 17) %}
+                    {% set m = mappings.get(i) %}
+                    <tr>
+                        <td class="is-vcentered"><strong>{{ i }}</strong></td>
+                        <td class="is-vcentered">
+                            <div class="select is-fullwidth">
+                                <select onchange="assignButton({{ i }}, this.value)">
+                                    <option value="">— Unassigned —</option>
+                                    {% for f in all_files %}
+                                    <option value="{{ f.id }}" {% if m and m.audio_id == f.id %}selected{% endif %}>
+                                        {{ f.filename }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </td>
+                        <td class="is-vcentered">
+                            {% if m %}
+                                <div><small><strong>Desc:</strong> {{ m.description or '-' }}</small></div>
+                                <div><small><strong>Cat:</strong> {{ m.category or '-' }}</small></div>
+                            {% else %}
+                                <span class="has-text-grey-light">-</span>
+                            {% endif %}
+                        </td>
+                        <td class="is-vcentered">
+                            <div class="buttons are-small">
+                                <button class="button is-info is-light" onclick="play({{ i }})" title="Play">
+                                    <span class="icon"><i class="fas fa-play"></i></span>
+                                </button>
+                                {% if m %}
+                                <button class="button is-warning is-light" onclick='editMetadata({{ m | tojson }})' title="Edit Metadata">
+                                    <span class="icon"><i class="fas fa-tag"></i></span>
+                                </button>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
   </div>
 </section>
+
+<!-- Metadata Modal -->
+<div class="modal" id="metaModal">
+  <div class="modal-background" onclick="closeModal()"></div>
+  <div class="modal-card">
+    <header class="modal-card-head">
+      <p class="modal-card-title">Edit Metadata</p>
+      <button class="delete" aria-label="close" onclick="closeModal()"></button>
+    </header>
+    <section class="modal-card-body">
+      <input type="hidden" id="metaId">
+      <div class="field">
+          <label class="label">Filename</label>
+          <div class="control"><input class="input" type="text" id="metaFilename" readonly></div>
+      </div>
+      <div class="field">
+          <label class="label">Description (Source)</label>
+          <div class="control"><input class="input" type="text" id="metaDesc" placeholder="e.g. Jurassic Park T-Rex"></div>
+      </div>
+      <div class="field">
+          <label class="label">Category</label>
+          <div class="control"><input class="input" type="text" id="metaCat" placeholder="e.g. Sci-Fi"></div>
+      </div>
+      <div class="field">
+          <label class="label">Hint</label>
+          <div class="control"><input class="input" type="text" id="metaHint" placeholder="e.g. Big Dinosaur"></div>
+      </div>
+    </section>
+    <footer class="modal-card-foot">
+      <button class="button is-success" onclick="saveMetadata()">Save changes</button>
+      <button class="button" onclick="closeModal()">Cancel</button>
+    </footer>
+  </div>
+</div>
+
 <script>
-async function play(id){
-  try{
-    const res = await fetch(`/play/${id}`, {method:'POST'});
-    const js = await res.json();
-    if(!js.ok){ alert('Error: '+(js.error||('rc='+js.rc))); }
-  }catch(e){ alert('Request failed'); }
-}
-
-async function uploadFile(ev){
-  ev.preventDefault();
-  const fd = new FormData();
-  const f = document.getElementById('file').files[0];
-  if(!f){ return false; }
-  fd.append('file', f);
-  const res = await fetch('/upload', {method:'POST', body: fd});
-  const js = await res.json();
-  if(js.ok){ location.reload(); } else { alert('Upload failed: '+(js.error||'')); }
-  return false;
-}
-
-async function delFile(name){
-  if(!confirm('Delete '+name+'?')) return;
-  const fd = new FormData();
-  fd.append('name', name);
-  const res = await fetch('/delete', {method:'POST', body: fd});
-  const js = await res.json();
-  if(js.ok){ location.reload(); } else { alert('Delete failed: '+(js.error||'')); }
-}
-
-async function assignOne(id){
-  const sel = document.getElementById('sel'+id);
-  const name = sel.value;
-  const res = await fetch('/assign', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({button:id, name})});
-  const js = await res.json();
-  if(js.ok){ location.reload(); } else { alert('Assign failed: '+(js.error||'')); }
-}
-
-async function saveAll(){
-  const mapping = {};
-  for(let i=1;i<=16;i++){
-    const sel = document.getElementById('sel'+i);
-    if(sel){ mapping[i] = sel.value; }
+// File input name update
+const fileInput = document.querySelector('#fileInput');
+fileInput.onchange = () => {
+  if (fileInput.files.length > 0) {
+    document.querySelector('#fileName').textContent = fileInput.files.length + ' files selected';
   }
-  const res = await fetch('/assign_bulk', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(mapping)});
-  const js = await res.json();
-  if(js.ok){ location.reload(); } else { alert('Save failed: '+(js.error||'')); }
+}
+
+function switchProfile(id) {
+    window.location.href = '/?profile_id=' + id;
+}
+
+async function createProfile() {
+    const name = prompt("Enter new profile name:");
+    if (!name) return;
+    const fd = new FormData();
+    fd.append('name', name);
+    const res = await fetch('/api/profile/create', {method: 'POST', body: fd});
+    const js = await res.json();
+    if (js.ok) switchProfile(js.id);
+    else alert(js.error);
+}
+
+async function renameProfile() {
+    const name = prompt("Enter new name for current profile:");
+    if (!name) return;
+    const fd = new FormData();
+    fd.append('id', '{{ active_profile_id }}');
+    fd.append('name', name);
+    const res = await fetch('/api/profile/rename', {method: 'POST', body: fd});
+    const js = await res.json();
+    if (js.ok) location.reload();
+    else alert(js.error);
+}
+
+async function deleteProfile() {
+    if (!confirm("Are you sure you want to delete this profile?")) return;
+    const fd = new FormData();
+    fd.append('id', '{{ active_profile_id }}');
+    const res = await fetch('/api/profile/delete', {method: 'POST', body: fd});
+    const js = await res.json();
+    if (js.ok) window.location.href = '/';
+    else alert(js.error);
+}
+
+async function assignChannel(chn) {
+    const fd = new FormData();
+    fd.append('channel', chn);
+    fd.append('profile_id', '{{ active_profile_id }}');
+    const res = await fetch('/api/channel/assign', {method: 'POST', body: fd});
+    const js = await res.json();
+    if (js.ok) location.reload();
+    else alert(js.error);
+}
+
+async function uploadFiles(ev) {
+    ev.preventDefault();
+    const form = document.getElementById('uploadForm');
+    const fd = new FormData(form);
+    const btn = form.querySelector('button[type="submit"]');
+    btn.classList.add('is-loading');
+    
+    try {
+        const res = await fetch('/upload', {method: 'POST', body: fd});
+        const js = await res.json();
+        if (js.ok) location.reload();
+        else alert(js.error);
+    } catch(e) {
+        alert("Upload error");
+    } finally {
+        btn.classList.remove('is-loading');
+    }
+}
+
+async function assignButton(btnId, audioId) {
+    const fd = new FormData();
+    fd.append('profile_id', '{{ active_profile_id }}');
+    fd.append('button_id', btnId);
+    fd.append('audio_id', audioId);
+    
+    // Optimistic UI update could happen here, but reload is safer for sync
+    const res = await fetch('/api/assign', {method: 'POST', body: fd});
+    const js = await res.json();
+    if (js.ok) location.reload();
+    else alert(js.error);
+}
+
+async function play(btnId) {
+    try {
+        // Pass active profile so we test what we see
+        await fetch(`/play/${btnId}?profile_id={{ active_profile_id }}`, {method: 'POST'});
+    } catch(e) {
+        console.error(e);
+    }
+}
+
+// Metadata Modal
+function editMetadata(data) {
+    document.getElementById('metaId').value = data.audio_id;
+    document.getElementById('metaFilename').value = data.filename;
+    document.getElementById('metaDesc').value = data.description || '';
+    document.getElementById('metaCat').value = data.category || '';
+    document.getElementById('metaHint').value = data.hint || '';
+    document.getElementById('metaModal').classList.add('is-active');
+}
+
+function closeModal() {
+    document.getElementById('metaModal').classList.remove('is-active');
+}
+
+async function saveMetadata() {
+    const fd = new FormData();
+    fd.append('id', document.getElementById('metaId').value);
+    fd.append('description', document.getElementById('metaDesc').value);
+    fd.append('category', document.getElementById('metaCat').value);
+    fd.append('hint', document.getElementById('metaHint').value);
+    
+    const res = await fetch('/api/metadata/update', {method: 'POST', body: fd});
+    if (res.ok) location.reload();
+    else alert('Error saving metadata');
 }
 </script>
 </body>

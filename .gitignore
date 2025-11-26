@@ -17,6 +17,10 @@ dist/
 log/
 *.log
 
+# Database
+data/*.db
+*.db-journal
+
 # Sounds (exclude big audio binaries from git; keep directories)
 Sounds/**
 
@@ -26,3 +30,6 @@ Sounds/**
 # Caches
 .mypy_cache/
 .pytest_cache/
+
+# Runtime
+*.pid

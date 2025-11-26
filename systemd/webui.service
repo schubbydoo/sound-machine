@@ -1,0 +1,18 @@
+[Unit]
+Description=Sound Machine Web UI (gunicorn)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=soundconsole
+WorkingDirectory=/home/soundconsole/sound-machine
+Environment=PATH=/home/soundconsole/sound-machine/.venv/bin:/usr/bin:/bin
+ExecStart=/home/soundconsole/sound-machine/.venv/bin/gunicorn -w 2 -b 0.0.0.0:8080 --timeout 300 web_interface.backend.wsgi:application
+Restart=on-failure
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target
+
+
