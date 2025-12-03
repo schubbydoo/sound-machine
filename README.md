@@ -104,9 +104,6 @@ The sound machine includes a full-featured web interface accessible at `http://l
 - **Print Tracks Label**: New feature to print a small, formatted label for the physical device, listing the current "Track" (Channel) assignments.
 - **Real-time Testing**: Play sounds directly from the web dashboard.
 - **Connectivity**: Manage Wi-Fi and Bluetooth connections directly from the UI.
-- **iCloud Sync**: Integrated iCloud photo album sync for gallery features (UI located under Album Management).
-- **Progress Tracking**: Real-time, incremental progress bars for downloads and sync operations.
-- **Operation Control**: Stop/Cancel buttons for running downloads and syncs.
 
 ### Starting the Web Server manually
 ```bash
