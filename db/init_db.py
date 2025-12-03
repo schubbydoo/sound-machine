@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS button_mappings (
 
 CREATE TABLE IF NOT EXISTS channels (
     channel_number INTEGER PRIMARY KEY CHECK(channel_number >= 1 AND channel_number <= 4),
-    profile_id INTEGER UNIQUE, -- Prevent same profile on multiple channels if desired, though requirements say "Conflicts should be gracefully handled"
+    profile_id INTEGER,
     FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE SET NULL
 );
 

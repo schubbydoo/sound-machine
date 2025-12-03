@@ -80,9 +80,8 @@
                                     <option value="">None</option>
                                     {% for i in range(1, 5) %}
                                     <option value="{{ i }}" 
-                                        {% if channels[i] == active_profile_id %}selected{% endif %}
-                                        {% if channels[i] and channels[i] != active_profile_id %}disabled{% endif %}>
-                                        Channel {{ i }} {% if channels[i] and channels[i] != active_profile_id %}(Busy){% endif %}
+                                        {% if channels.get(i) and channels[i].id == active_profile_id %}selected{% endif %}>
+                                        Channel {{ i }} {% if channels.get(i) %}({{ channels[i].name }}){% endif %}
                                     </option>
                                     {% endfor %}
                                 </select>
@@ -94,6 +93,12 @@
                     <a class="button is-info" href="/print_key/{{ active_profile_id }}" target="_blank">
                         <span class="icon"><i class="fas fa-print"></i></span>
                         <span>Print Answer Key</span>
+                    </a>
+                </div>
+                <div class="level-item">
+                    <a class="button is-primary is-light" href="/print_tracks" target="_blank" title="Print Channel/Track Assignments Label">
+                        <span class="icon"><i class="fas fa-tags"></i></span>
+                        <span>Print Tracks</span>
                     </a>
                 </div>
             </div>

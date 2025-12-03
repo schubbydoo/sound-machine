@@ -145,9 +145,13 @@ def index():
             mappings[r['button_id']] = dict(r)
 
     channels = {}
-    c_rows = conn.execute("SELECT channel_number, profile_id FROM channels").fetchall()
+    c_rows = conn.execute("""
+        SELECT c.channel_number, c.profile_id, p.name 
+        FROM channels c
+        LEFT JOIN profiles p ON c.profile_id = p.id
+    """).fetchall()
     for r in c_rows:
-        channels[r['channel_number']] = r['profile_id']
+        channels[r['channel_number']] = {'id': r['profile_id'], 'name': r['name']}
 
     all_files = conn.execute("SELECT * FROM audio_files ORDER BY filename").fetchall()
 
@@ -299,6 +303,22 @@ def print_key(profile_id):
     """, (profile_id,)).fetchall()
     conn.close()
     return render_template('print_key.html', profile=profile, rows=rows)
+
+@app.route('/print_tracks')
+def print_tracks():
+    conn = get_db()
+    channels = {}
+    c_rows = conn.execute("""
+        SELECT c.channel_number, c.profile_id, p.name 
+        FROM channels c
+        LEFT JOIN profiles p ON c.profile_id = p.id
+    """).fetchall()
+    conn.close()
+    
+    for r in c_rows:
+        channels[r['channel_number']] = {'id': r['profile_id'], 'name': r['name']}
+        
+    return render_template('print_tracks.html', channels=channels)
 
 # ---------------- Network Routes ----------------
 

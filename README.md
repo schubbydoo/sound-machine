@@ -8,7 +8,8 @@ Low-latency wired sound machine using a Raspberry Pi Pico (RP2040) for 16 button
 - **Sound Interruption**: New button presses immediately stop current playback
 - **LED Feedback**: Glass skull LED lights respond to button presses and audio playback
 - **Channel Knob**: 4-position rotary switch for instant profile switching
-- **Web Interface**: Full-featured web UI for profile management, bulk uploads, metadata editing, and Answer Key generation.
+- **Web Interface**: Full-featured web UI for profile management, bulk uploads, metadata editing, and Answer Key/Label generation.
+- **Styling**: Bulma CSS framework for a responsive and modern UI.
 
 ## Hardware Summary
 - **Buttons → Pico**: active-low to GND
@@ -100,7 +101,12 @@ The sound machine includes a full-featured web interface accessible at `http://l
 - **Sound Management**: Bulk upload WAV files, auto-assign to buttons.
 - **Metadata Editor**: Add Descriptions, Categories, and Hints to sounds for gameplay.
 - **Answer Key**: One-click generation of a printable answer key. Includes customizable columns (Channel, Button #, Description, Category, Hint, Filename) and persistent settings.
+- **Print Tracks Label**: New feature to print a small, formatted label for the physical device, listing the current "Track" (Channel) assignments.
 - **Real-time Testing**: Play sounds directly from the web dashboard.
+- **Connectivity**: Manage Wi-Fi and Bluetooth connections directly from the UI.
+- **iCloud Sync**: Integrated iCloud photo album sync for gallery features (UI located under Album Management).
+- **Progress Tracking**: Real-time, incremental progress bars for downloads and sync operations.
+- **Operation Control**: Stop/Cancel buttons for running downloads and syncs.
 
 ### Starting the Web Server manually
 ```bash
