@@ -8,7 +8,7 @@ Low-latency wired sound machine using a Raspberry Pi Pico (RP2040) for 16 button
 - **Sound Interruption**: New button presses immediately stop current playback
 - **LED Feedback**: Glass skull LED lights respond to button presses and audio playback
 - **Channel Knob**: 4-position rotary switch for instant profile switching
-- **Web Interface**: Full-featured web UI for profile management, bulk uploads, metadata editing, and Answer Key/Label generation.
+- **Web Interface**: Full-featured web UI for profile management, bulk uploads (with overwrite support), selective file deletion, metadata editing, and Answer Key/Label generation.
 - **Styling**: Bulma CSS framework for a responsive and modern UI.
 
 ## Hardware Summary
@@ -20,10 +20,10 @@ Low-latency wired sound machine using a Raspberry Pi Pico (RP2040) for 16 button
   - Provides PWM signal to control LED switch circuit
   - Single wire + ground connection
 - **Channel Knob**: 4-position rotary switch connected to Pi Zero 2W GPIO
-  - Channel 1: GPIO 22 (Yellow)
-  - Channel 2: GPIO 23 (Orange)
-  - Channel 3: GPIO 24 (Red)
-  - Channel 4: GPIO 25 (Brown)
+  - Channel 1 (Track 1): GPIO 22 (Yellow)
+  - Channel 2 (Track 2): GPIO 23 (Orange)
+  - Channel 3 (Track 3): GPIO 24 (Red)
+  - Channel 4 (Track 4): GPIO 25 (Brown)
   - Common: GND (Black)
 - **Pi Zero 2W**: 4-port USB hat (Pico + USB DAC connected)
 - **Pico firmware protocol**:
@@ -87,7 +87,7 @@ sound-machine/
 The system now uses a **SQLite database** instead of a JSON file for configuration.
 
 - **Profiles**: Create multiple sound profiles (e.g., "Horror", "Trivia", "Sci-Fi").
-- **Channels**: Assign any profile to one of the 4 hardware channels (Rotary Knob positions).
+- **Tracks (Channels)**: Assign any profile to one of the 4 hardware channels (Rotary Knob positions).
 - **Assignments**: Map any uploaded WAV file to any of the 16 buttons for a specific profile.
 
 All configuration is done via the **Web Interface**.
@@ -97,10 +97,13 @@ The sound machine includes a full-featured web interface accessible at `http://l
 
 ### Features
 - **Profile Management**: Create, Rename, Delete profiles.
-- **Channel Assignment**: Map profiles to the physical rotary knob positions.
-- **Sound Management**: Bulk upload WAV files, auto-assign to buttons.
+- **Track Assignment**: Map profiles to the physical rotary knob positions (Tracks 1-4).
+- **Sound Management**: 
+    - Bulk upload WAV files (auto-assigns to buttons if requested).
+    - **Overwrite Support**: Uploading a file with the same name replaces the existing file.
+    - **File Management**: Selectively delete multiple audio files to free up space.
 - **Metadata Editor**: Add Descriptions, Categories, and Hints to sounds for gameplay.
-- **Answer Key**: One-click generation of a printable answer key. Includes customizable columns (Channel, Button #, Description, Category, Hint, Filename) and persistent settings.
+- **Answer Key**: One-click generation of a printable answer key. Includes customizable columns (Track, Button #, Description, Category, Hint, Filename) and persistent settings.
 - **Print Tracks Label**: New feature to print a small, formatted label for the physical device, listing the current "Track" (Channel) assignments.
 - **Real-time Testing**: Play sounds directly from the web dashboard.
 - **Connectivity**: Manage Wi-Fi and Bluetooth connections directly from the UI.

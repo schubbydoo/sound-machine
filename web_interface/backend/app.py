@@ -224,6 +224,60 @@ def assign_channel():
     conn.close()
     return jsonify({'ok': True})
 
+@app.route('/api/audio/delete', methods=['POST'])
+def delete_audio():
+    data = request.json if request.is_json else request.form
+    ids = data.get('ids')
+    # Handle list passed as form data or json
+    if not ids:
+        return jsonify({'ok': False, 'error': 'No IDs provided'}), 400
+    
+    # If form data list
+    if isinstance(ids, str):
+        try:
+            ids = json.loads(ids)
+        except:
+            ids = [ids]
+            
+    if not isinstance(ids, list):
+        ids = [ids]
+
+    conn = get_db()
+    deleted_count = 0
+    errors = []
+    
+    for aid in ids:
+        try:
+            aid = int(aid)
+            row = conn.execute("SELECT filepath, filename FROM audio_files WHERE id = ?", (aid,)).fetchone()
+            if row:
+                filepath = Path(row['filepath'])
+                filename = row['filename']
+                # Try to delete file
+                try:
+                    if filepath.exists():
+                        filepath.unlink()
+                except Exception as e:
+                    errors.append(f"Failed to delete {filename}: {e}")
+                    # We continue to delete from DB? 
+                    # Probably better to only delete from DB if file is gone or wasn't there.
+                    # If file deletion fails (permissions?), we might want to keep DB record.
+                    # But if user wants it gone... let's proceed with DB deletion so it's gone from UI.
+                
+                # Remove from DB
+                conn.execute("DELETE FROM audio_files WHERE id = ?", (aid,))
+                # Also remove mappings - ON DELETE CASCADE might handle this if set up, 
+                # but let's be explicit just in case
+                conn.execute("DELETE FROM button_mappings WHERE audio_file_id = ?", (aid,))
+                deleted_count += 1
+        except Exception as e:
+            errors.append(f"Error processing ID {aid}: {e}")
+    
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'ok': True, 'deleted': deleted_count, 'errors': errors})
+
 @app.route('/upload', methods=['POST'])
 def upload_file():
     if 'file' not in request.files: return jsonify({'ok': False, 'error': 'No file'}), 400
@@ -241,11 +295,8 @@ def upload_file():
         dest_dir = SOUNDS_ROOT / 'uploads'
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest = dest_dir / name
-        if dest.exists():
-            base, ext = os.path.splitext(name)
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            name = f"{base}_{timestamp}{ext}"
-            dest = dest_dir / name
+        # Overwrite behavior: do not rename if exists
+        
         with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp:
             tmp_path = Path(tmp.name)
             f.save(str(tmp_path))
@@ -255,8 +306,15 @@ def upload_file():
             else:
                 shutil.move(str(tmp_path), str(dest))
             os.chmod(str(dest), 0o644)
-            cursor = conn.execute("INSERT INTO audio_files (filename, filepath) VALUES (?, ?)", (name, str(dest.resolve())))
-            fid = cursor.lastrowid
+            
+            # Update DB - check if exists first to preserve ID (and mappings)
+            row = conn.execute("SELECT id FROM audio_files WHERE filepath = ?", (str(dest.resolve()),)).fetchone()
+            if row:
+                fid = row['id']
+            else:
+                cursor = conn.execute("INSERT INTO audio_files (filename, filepath) VALUES (?, ?)", (name, str(dest.resolve())))
+                fid = cursor.lastrowid
+                
             saved_ids.append(fid)
             if assign_idx and profile_id and assign_idx <= 16:
                 conn.execute("INSERT OR REPLACE INTO button_mappings (profile_id, button_id, audio_file_id) VALUES (?, ?, ?)", 

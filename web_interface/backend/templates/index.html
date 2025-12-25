@@ -72,20 +72,23 @@
                 <div class="level-item">
                     <div class="field has-addons">
                         <div class="control">
-                            <a class="button is-static">Assigned Channel</a>
+                            <a class="button is-static">Assigned Track</a>
                         </div>
                         <div class="control">
                             <div class="select">
-                                <select id="channelSelect" onchange="assignChannel(this.value)">
-                                    <option value="">None</option>
+                                <select id="channelSelect">
+                                    <option value="">Select Track...</option>
                                     {% for i in range(1, 5) %}
                                     <option value="{{ i }}" 
                                         {% if channels.get(i) and channels[i].id == active_profile_id %}selected{% endif %}>
-                                        Channel {{ i }} {% if channels.get(i) %}({{ channels[i].name }}){% endif %}
+                                        Track {{ i }} {% if channels.get(i) %}({{ channels[i].name }}){% endif %}
                                     </option>
                                     {% endfor %}
                                 </select>
                             </div>
+                        </div>
+                        <div class="control">
+                            <button class="button is-link" onclick="assignChannel()">Assign</button>
                         </div>
                     </div>
                 </div>
@@ -96,7 +99,7 @@
                     </a>
                 </div>
                 <div class="level-item">
-                    <a class="button is-primary is-light" href="/print_tracks" target="_blank" title="Print Channel/Track Assignments Label">
+                    <a class="button is-primary is-light" href="/print_tracks" target="_blank" title="Print Track Assignments Label">
                         <span class="icon"><i class="fas fa-tags"></i></span>
                         <span>Print Tracks</span>
                     </a>
@@ -107,7 +110,17 @@
 
     <!-- Bulk Upload -->
     <div class="box">
-        <h2 class="title is-4">Upload Audio</h2>
+        <div class="level mb-2">
+            <div class="level-left">
+                <h2 class="title is-4">Upload Audio</h2>
+            </div>
+            <div class="level-right">
+                <button class="button is-danger is-light is-small" onclick="openFilesModal()">
+                    <span class="icon"><i class="fas fa-trash"></i></span>
+                    <span>Manage Files</span>
+                </button>
+            </div>
+        </div>
         <form id="uploadForm" onsubmit="return uploadFiles(event)">
             <input type="hidden" name="profile_id" value="{{ active_profile_id }}">
             <div class="field is-horizontal">
@@ -234,6 +247,50 @@
   </div>
 </div>
 
+<!-- File Management Modal -->
+<div class="modal" id="filesModal">
+  <div class="modal-background" onclick="closeFilesModal()"></div>
+  <div class="modal-card" style="width: 800px; max-width: 95%;">
+    <header class="modal-card-head">
+      <p class="modal-card-title">Manage Audio Files</p>
+      <button class="delete" aria-label="close" onclick="closeFilesModal()"></button>
+    </header>
+    <section class="modal-card-body">
+      <div class="level">
+          <div class="level-left">
+              <p>Select files to delete permanently.</p>
+          </div>
+          <div class="level-right">
+              <button class="button is-danger" onclick="deleteSelectedFiles()" id="deleteBtn" disabled>
+                  <span class="icon"><i class="fas fa-trash"></i></span>
+                  <span>Delete Selected</span>
+              </button>
+          </div>
+      </div>
+      <div class="table-container" style="max-height: 60vh; overflow-y: auto;">
+          <table class="table is-fullwidth is-striped is-hoverable is-narrow">
+            <thead>
+                <tr>
+                    <th width="40"><input type="checkbox" onchange="toggleAllFiles(this)"></th>
+                    <th>Filename</th>
+                    <th>Path</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for f in all_files %}
+                <tr>
+                    <td><input type="checkbox" class="file-check" value="{{ f.id }}" onchange="updateDeleteBtn()"></td>
+                    <td>{{ f.filename }}</td>
+                    <td class="is-size-7">{{ f.filepath }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+          </table>
+      </div>
+    </section>
+  </div>
+</div>
+
 <script>
 // File input name update
 const fileInput = document.querySelector('#fileInput');
@@ -280,7 +337,12 @@ async function deleteProfile() {
     else alert(js.error);
 }
 
-async function assignChannel(chn) {
+async function assignChannel() {
+    const chn = document.getElementById('channelSelect').value;
+    if (!chn) {
+        alert("Please select a track first.");
+        return;
+    }
     const fd = new FormData();
     fd.append('channel', chn);
     fd.append('profile_id', '{{ active_profile_id }}');
@@ -355,6 +417,69 @@ async function saveMetadata() {
     const res = await fetch('/api/metadata/update', {method: 'POST', body: fd});
     if (res.ok) location.reload();
     else alert('Error saving metadata');
+}
+
+// File Management Modal Functions
+function openFilesModal() {
+    document.getElementById('filesModal').classList.add('is-active');
+}
+
+function closeFilesModal() {
+    document.getElementById('filesModal').classList.remove('is-active');
+}
+
+function toggleAllFiles(source) {
+    const checkboxes = document.querySelectorAll('.file-check');
+    for(let i=0; i<checkboxes.length; i++) {
+        checkboxes[i].checked = source.checked;
+    }
+    updateDeleteBtn();
+}
+
+function updateDeleteBtn() {
+    const checkboxes = document.querySelectorAll('.file-check:checked');
+    const btn = document.getElementById('deleteBtn');
+    if (checkboxes.length > 0) {
+        btn.removeAttribute('disabled');
+        btn.innerText = `Delete Selected (${checkboxes.length})`;
+    } else {
+        btn.setAttribute('disabled', 'true');
+        btn.innerText = 'Delete Selected';
+    }
+}
+
+async function deleteSelectedFiles() {
+    const checkboxes = document.querySelectorAll('.file-check:checked');
+    if (checkboxes.length === 0) return;
+    
+    if (!confirm(`Are you sure you want to delete ${checkboxes.length} files? This cannot be undone.`)) return;
+    
+    const ids = [];
+    checkboxes.forEach((cb) => ids.push(cb.value));
+    
+    const btn = document.getElementById('deleteBtn');
+    btn.classList.add('is-loading');
+    
+    try {
+        const res = await fetch('/api/audio/delete', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ids: ids})
+        });
+        const js = await res.json();
+        if (js.ok) {
+            if (js.errors && js.errors.length > 0) {
+                alert("Some files could not be deleted:\n" + js.errors.join("\n"));
+            }
+            location.reload();
+        } else {
+            alert(js.error);
+        }
+    } catch (e) {
+        alert("Delete failed: " + e);
+    } finally {
+        btn.classList.remove('is-loading');
+    }
 }
 </script>
 </body>
