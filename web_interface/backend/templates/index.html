@@ -34,7 +34,9 @@
     <!-- Profile Management -->
     <div class="box">
         <h2 class="title is-4">Profile Management</h2>
-        <div class="level">
+        
+        <!-- Row 1: Profile Selection and Assignment -->
+        <div class="level mb-2">
             <div class="level-left">
                 <div class="level-item">
                     <div class="field has-addons">
@@ -92,11 +94,40 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Row 2: Description and Printing -->
+        <div class="level">
+            <div class="level-left">
                 <div class="level-item">
-                    <a class="button is-info" href="/print_key/{{ active_profile_id }}" target="_blank">
-                        <span class="icon"><i class="fas fa-print"></i></span>
-                        <span>Print Answer Key</span>
-                    </a>
+                     <button class="button is-warning is-light" onclick="openInstructionsModal()">
+                        <span class="icon"><i class="fas fa-align-left"></i></span>
+                        <span>Description</span>
+                    </button>
+                </div>
+            </div>
+            <div class="level-right">
+                <div class="level-item">
+                    <div class="dropdown is-hoverable is-right">
+                        <div class="dropdown-trigger">
+                            <button class="button is-info" aria-haspopup="true" aria-controls="dropdown-menu">
+                                <span class="icon"><i class="fas fa-print"></i></span>
+                                <span>Print</span>
+                                <span class="icon is-small"><i class="fas fa-angle-down"></i></span>
+                            </button>
+                        </div>
+                        <div class="dropdown-menu" id="dropdown-menu" role="menu">
+                            <div class="dropdown-content">
+                                <a href="/print_key/{{ active_profile_id }}" target="_blank" class="dropdown-item">
+                                    Answer Key
+                                </a>
+                                <a href="/print_worksheet/{{ active_profile_id }}" target="_blank" class="dropdown-item">
+                                    Worksheet
+                                </a>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="level-item">
                     <a class="button is-primary is-light" href="/print_tracks" target="_blank" title="Print Track Assignments Label">
@@ -104,6 +135,13 @@
                         <span>Print Tracks</span>
                     </a>
                 </div>
+            </div>
+        </div>
+        
+        <!-- Row 3: Description Display -->
+        <div id="descriptionDisplay" class="message is-small is-info is-light mt-3" style="display: none;">
+            <div class="message-body">
+                <strong>Description:</strong> <span id="descText"></span>
             </div>
         </div>
     </div>
@@ -247,6 +285,30 @@
   </div>
 </div>
 
+<!-- Profile Instructions Modal -->
+<div class="modal" id="instrModal">
+  <div class="modal-background" onclick="closeInstrModal()"></div>
+  <div class="modal-card">
+    <header class="modal-card-head">
+      <p class="modal-card-title">Profile Instructions</p>
+      <button class="delete" aria-label="close" onclick="closeInstrModal()"></button>
+    </header>
+    <section class="modal-card-body">
+      <div class="field">
+          <label class="label">Instructions / Description</label>
+          <div class="control">
+              <textarea class="textarea" id="profileInstr" placeholder="e.g. Name the song and artist..."></textarea>
+          </div>
+          <p class="help">These instructions will appear on the printed worksheet.</p>
+      </div>
+    </section>
+    <footer class="modal-card-foot">
+      <button class="button is-success" onclick="saveInstructions()">Save</button>
+      <button class="button" onclick="closeInstrModal()">Cancel</button>
+    </footer>
+  </div>
+</div>
+
 <!-- File Management Modal -->
 <div class="modal" id="filesModal">
   <div class="modal-background" onclick="closeFilesModal()"></div>
@@ -335,6 +397,41 @@ async function deleteProfile() {
     const js = await res.json();
     if (js.ok) window.location.href = '/';
     else alert(js.error);
+}
+
+// Profile Instructions
+{% for p in profiles %}
+    {% if p.id == active_profile_id %}
+    const currentProfileInstructions = {{ p.instructions | tojson or '""' }};
+    {% endif %}
+{% endfor %}
+
+// Initialize UI
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof currentProfileInstructions !== 'undefined' && currentProfileInstructions) {
+        document.getElementById('descText').innerText = currentProfileInstructions;
+        document.getElementById('descriptionDisplay').style.display = 'block';
+    }
+});
+
+function openInstructionsModal() {
+    document.getElementById('profileInstr').value = currentProfileInstructions || '';
+    document.getElementById('instrModal').classList.add('is-active');
+}
+
+function closeInstrModal() {
+    document.getElementById('instrModal').classList.remove('is-active');
+}
+
+async function saveInstructions() {
+    const instr = document.getElementById('profileInstr').value;
+    const fd = new FormData();
+    fd.append('id', '{{ active_profile_id }}');
+    fd.append('instructions', instr);
+    
+    const res = await fetch('/api/profile/update_instructions', {method: 'POST', body: fd});
+    if (res.ok) location.reload();
+    else alert('Error saving instructions');
 }
 
 async function assignChannel() {

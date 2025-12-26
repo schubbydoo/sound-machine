@@ -174,6 +174,17 @@ def create_profile():
     except sqlite3.IntegrityError:
         return jsonify({'ok': False, 'error': 'Name exists'}), 400
 
+@app.route('/api/profile/update_instructions', methods=['POST'])
+def update_profile_instructions():
+    pid = request.form.get('id')
+    instr = request.form.get('instructions')
+    if not pid: return jsonify({'ok': False, 'error': 'ID required'}), 400
+    conn = get_db()
+    conn.execute("UPDATE profiles SET instructions = ? WHERE id = ?", (instr, pid))
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
+
 @app.route('/api/profile/rename', methods=['POST'])
 def rename_profile():
     pid = request.form.get('id')
@@ -377,6 +388,26 @@ def print_tracks():
         channels[r['channel_number']] = {'id': r['profile_id'], 'name': r['name']}
         
     return render_template('print_tracks.html', channels=channels)
+
+@app.route('/print_worksheet/<int:profile_id>')
+def print_worksheet(profile_id):
+    conn = get_db()
+    profile = conn.execute("""
+        SELECT p.*, c.channel_number
+        FROM profiles p
+        LEFT JOIN channels c ON p.id = c.profile_id
+        WHERE p.id = ?
+    """, (profile_id,)).fetchone()
+    
+    rows = conn.execute("""
+        SELECT bm.button_id, af.hint
+        FROM button_mappings bm
+        JOIN audio_files af ON bm.audio_file_id = af.id
+        WHERE bm.profile_id = ?
+        ORDER BY bm.button_id ASC
+    """, (profile_id,)).fetchall()
+    conn.close()
+    return render_template('print_worksheet.html', profile=profile, rows=rows)
 
 # ---------------- Network Routes ----------------
 

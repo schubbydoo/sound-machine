@@ -10,6 +10,7 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS profiles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT UNIQUE NOT NULL,
+    instructions TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

@@ -44,6 +44,11 @@
     </div>
 
     <h1>Answer Key: {{ profile.name }}</h1>
+    {% if profile.instructions %}
+    <div style="margin-bottom: 20px; font-style: italic; background: #f9f9f9; padding: 10px; border-left: 4px solid #ccc;">
+        <strong>Instructions:</strong> {{ profile.instructions }}
+    </div>
+    {% endif %}
     
     <table id="keyTable">
         <thead>
