@@ -352,10 +352,7 @@ def update_metadata():
     conn.close()
     return jsonify({'ok': True})
 
-@app.route('/print_key/<int:profile_id>')
-def print_key(profile_id):
-    conn = get_db()
-    # Get profile info along with assigned channel (if any)
+def get_profile_full_data(conn, profile_id):
     profile = conn.execute("""
         SELECT p.*, c.channel_number
         FROM profiles p
@@ -370,8 +367,27 @@ def print_key(profile_id):
         WHERE bm.profile_id = ?
         ORDER BY bm.button_id ASC
     """, (profile_id,)).fetchall()
+    return profile, rows
+
+@app.route('/print_key/<int:profile_id>')
+def print_key(profile_id):
+    conn = get_db()
+    p, r = get_profile_full_data(conn, profile_id)
     conn.close()
-    return render_template('print_key.html', profile=profile, rows=rows)
+    return render_template('print_key.html', items=[{'profile': p, 'rows': r}])
+
+@app.route('/print_key/assigned')
+def print_key_assigned():
+    conn = get_db()
+    items = []
+    # Get assigned profiles ordered by channel
+    assigned = conn.execute("SELECT profile_id FROM channels WHERE channel_number BETWEEN 1 AND 4 ORDER BY channel_number").fetchall()
+    for row in assigned:
+        if row['profile_id']:
+            p, r = get_profile_full_data(conn, row['profile_id'])
+            items.append({'profile': p, 'rows': r})
+    conn.close()
+    return render_template('print_key.html', items=items)
 
 @app.route('/print_tracks')
 def print_tracks():
@@ -392,22 +408,21 @@ def print_tracks():
 @app.route('/print_worksheet/<int:profile_id>')
 def print_worksheet(profile_id):
     conn = get_db()
-    profile = conn.execute("""
-        SELECT p.*, c.channel_number
-        FROM profiles p
-        LEFT JOIN channels c ON p.id = c.profile_id
-        WHERE p.id = ?
-    """, (profile_id,)).fetchone()
-    
-    rows = conn.execute("""
-        SELECT bm.button_id, af.hint
-        FROM button_mappings bm
-        JOIN audio_files af ON bm.audio_file_id = af.id
-        WHERE bm.profile_id = ?
-        ORDER BY bm.button_id ASC
-    """, (profile_id,)).fetchall()
+    p, r = get_profile_full_data(conn, profile_id)
     conn.close()
-    return render_template('print_worksheet.html', profile=profile, rows=rows)
+    return render_template('print_worksheet.html', items=[{'profile': p, 'rows': r}])
+
+@app.route('/print_worksheet/assigned')
+def print_worksheet_assigned():
+    conn = get_db()
+    items = []
+    assigned = conn.execute("SELECT profile_id FROM channels WHERE channel_number BETWEEN 1 AND 4 ORDER BY channel_number").fetchall()
+    for row in assigned:
+        if row['profile_id']:
+            p, r = get_profile_full_data(conn, row['profile_id'])
+            items.append({'profile': p, 'rows': r})
+    conn.close()
+    return render_template('print_worksheet.html', items=items)
 
 # ---------------- Network Routes ----------------
 

@@ -120,10 +120,17 @@
                         <div class="dropdown-menu" id="dropdown-menu" role="menu">
                             <div class="dropdown-content">
                                 <a href="/print_key/{{ active_profile_id }}" target="_blank" class="dropdown-item">
-                                    Answer Key
+                                    Answer Key (Current)
                                 </a>
+                                <a href="/print_key/assigned" target="_blank" class="dropdown-item">
+                                    Answer Key (All Assigned)
+                                </a>
+                                <hr class="dropdown-divider">
                                 <a href="/print_worksheet/{{ active_profile_id }}" target="_blank" class="dropdown-item">
-                                    Worksheet
+                                    Worksheet (Current)
+                                </a>
+                                <a href="/print_worksheet/assigned" target="_blank" class="dropdown-item">
+                                    Worksheet (All Assigned)
                                 </a>
                             </div>
                         </div>

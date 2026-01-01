@@ -2,28 +2,50 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Worksheet - {{ profile.name }}</title>
+    <title>Worksheet</title>
     <style>
         body { font-family: sans-serif; padding: 20px; }
-        h1 { text-align: center; }
+        h1 { text-align: center; font-size: 1.5em; margin: 10px 0; }
         .instructions {
-            margin: 20px 0;
-            padding: 15px;
+            margin: 10px 0;
+            padding: 10px;
             background: #f9f9f9;
             border: 1px solid #ddd;
             border-radius: 5px;
+            font-size: 0.9em;
         }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { border: 1px solid #ccc; padding: 12px 8px; text-align: left; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.9em; }
+        th, td { border: 1px solid #ccc; padding: 4px 8px; text-align: left; }
         th { background: #eee; }
         .answer-col { width: 60%; }
         .btn-col { width: 50px; text-align: center; }
         .hint-col { width: 30%; color: #666; font-style: italic; }
         
+        .page-break { page-break-after: always; }
+        .worksheet-container { margin-bottom: 40px; }
+
+        /* Grid Layout Styles */
+        .grid-view {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .grid-view .worksheet-container {
+            margin-bottom: 20px;
+            break-inside: avoid;
+            border: 1px solid #eee;
+            padding: 10px;
+        }
+        .grid-view .page-break {
+            page-break-after: auto;
+        }
+
         @media print {
             .no-print { display: none; }
             .instructions { border: 1px solid #000; background: none; }
             th { background: none; border-bottom: 2px solid #000; }
+            .worksheet-container { margin-bottom: 0; }
+            .grid-view { display: grid; }
         }
         
         .controls {
@@ -43,6 +65,9 @@
                 <button onclick="window.close()" style="font-size: 1.1em; padding: 5px 15px; cursor: pointer;">Close</button>
             </div>
             <div>
+                <label class="checkbox-group" style="font-weight: bold; color: #0066cc; display: block; margin-bottom: 10px;">
+                    <input type="checkbox" id="cb-grid" onchange="toggleGrid()"> Compact Grid Layout (2 per page)
+                </label>
                  <label style="cursor: pointer;">
                     <input type="checkbox" id="cb-hint" checked onchange="toggleHint()"> Include Hint / Category
                 </label>
@@ -50,33 +75,51 @@
         </div>
     </div>
 
-    <h1>{{ profile.name }}</h1>
-    
-    {% if profile.instructions %}
-    <div class="instructions">
-        <strong>Instructions:</strong> {{ profile.instructions }}
+    <div id="profiles-container">
+        {% for item in items %}
+        <div class="worksheet-container {% if not loop.last %}page-break{% endif %}">
+            <h1>{{ item.profile.name }}</h1>
+            
+            {% if item.profile.instructions %}
+            <div class="instructions">
+                <strong>Instructions:</strong> {{ item.profile.instructions }}
+            </div>
+            {% endif %}
+            
+            <table>
+                <thead>
+                    <tr>
+                        <th class="btn-col">Button</th>
+                        <th class="hint-col">Hint / Category</th>
+                        <th class="answer-col">Your Answer</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in item.rows %}
+                    <tr>
+                        <td class="btn-col"><strong>{{ r.button_id }}</strong></td>
+                        <td class="hint-col">{{ r.hint or '' }}</td>
+                        <td class="answer-col"></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endfor %}
     </div>
-    {% endif %}
-    
-    <table>
-        <thead>
-            <tr>
-                <th class="btn-col">Button</th>
-                <th class="hint-col">Hint / Category</th>
-                <th class="answer-col">Your Answer</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for r in rows %}
-            <tr>
-                <td class="btn-col"><strong>{{ r.button_id }}</strong></td>
-                <td class="hint-col">{{ r.hint or '' }}</td>
-                <td class="answer-col"></td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+
     <script>
+        function toggleGrid() {
+            const isGrid = document.getElementById('cb-grid').checked;
+            const container = document.getElementById('profiles-container');
+            if (isGrid) {
+                container.classList.add('grid-view');
+            } else {
+                container.classList.remove('grid-view');
+            }
+            localStorage.setItem('print_worksheet_grid', isGrid);
+        }
+
         function toggleHint() {
             const show = document.getElementById('cb-hint').checked;
             const cells = document.querySelectorAll('.hint-col');
@@ -91,6 +134,16 @@
 
         // Load preference
         window.onload = function() {
+            // Load Grid Preference
+            const gridStored = localStorage.getItem('print_worksheet_grid');
+            if (gridStored !== null) {
+                const isGrid = gridStored === 'true';
+                document.getElementById('cb-grid').checked = isGrid;
+                if (isGrid) {
+                    document.getElementById('profiles-container').classList.add('grid-view');
+                }
+            }
+
             const stored = localStorage.getItem('print_worksheet_hint');
             if (stored !== null) {
                 const shouldShow = stored === 'true';
