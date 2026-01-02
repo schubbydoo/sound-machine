@@ -143,7 +143,7 @@
     <div id="profiles-container">
         {% for item in items %}
         <div class="worksheet-container {% if not loop.last %}page-break{% endif %}">
-            <h1>{{ item.profile.name }}</h1>
+            <h1>{{ item.profile.name }} {% if item.profile.channel_number %}(Track {{ item.profile.channel_number }}){% endif %}</h1>
             
             {% if item.profile.instructions %}
             <div class="instructions">

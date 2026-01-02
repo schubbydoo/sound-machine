@@ -134,7 +134,7 @@
     <div id="profiles-container">
         {% for item in items %}
         <div class="key-container {% if not loop.last %}page-break{% endif %}">
-            <h1>Answer Key: {{ item.profile.name }}</h1>
+            <h1>Answer Key: {{ item.profile.name }} {% if item.profile.channel_number %}(Track {{ item.profile.channel_number }}){% endif %}</h1>
             {% if item.profile.instructions %}
             <div style="margin-bottom: 10px; font-style: italic; background: #f9f9f9; padding: 5px; border-left: 4px solid #ccc; font-size: 0.9em;">
                 <strong>Instructions:</strong> {{ item.profile.instructions }}
