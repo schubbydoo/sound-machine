@@ -367,14 +367,20 @@ def get_profile_full_data(conn, profile_id):
         WHERE bm.profile_id = ?
         ORDER BY bm.button_id ASC
     """, (profile_id,)).fetchall()
-    return profile, rows
+    
+    # Create mapping for grid view
+    mapping = {}
+    for r in rows:
+        mapping[r['button_id']] = dict(r)
+        
+    return profile, rows, mapping
 
 @app.route('/print_key/<int:profile_id>')
 def print_key(profile_id):
     conn = get_db()
-    p, r = get_profile_full_data(conn, profile_id)
+    p, r, m = get_profile_full_data(conn, profile_id)
     conn.close()
-    return render_template('print_key.html', items=[{'profile': p, 'rows': r}])
+    return render_template('print_key.html', items=[{'profile': p, 'rows': r, 'map': m}])
 
 @app.route('/print_key/assigned')
 def print_key_assigned():
@@ -384,8 +390,8 @@ def print_key_assigned():
     assigned = conn.execute("SELECT profile_id FROM channels WHERE channel_number BETWEEN 1 AND 4 ORDER BY channel_number").fetchall()
     for row in assigned:
         if row['profile_id']:
-            p, r = get_profile_full_data(conn, row['profile_id'])
-            items.append({'profile': p, 'rows': r})
+            p, r, m = get_profile_full_data(conn, row['profile_id'])
+            items.append({'profile': p, 'rows': r, 'map': m})
     conn.close()
     return render_template('print_key.html', items=items)
 
@@ -408,9 +414,9 @@ def print_tracks():
 @app.route('/print_worksheet/<int:profile_id>')
 def print_worksheet(profile_id):
     conn = get_db()
-    p, r = get_profile_full_data(conn, profile_id)
+    p, r, m = get_profile_full_data(conn, profile_id)
     conn.close()
-    return render_template('print_worksheet.html', items=[{'profile': p, 'rows': r}])
+    return render_template('print_worksheet.html', items=[{'profile': p, 'rows': r, 'map': m}])
 
 @app.route('/print_worksheet/assigned')
 def print_worksheet_assigned():
@@ -419,8 +425,8 @@ def print_worksheet_assigned():
     assigned = conn.execute("SELECT profile_id FROM channels WHERE channel_number BETWEEN 1 AND 4 ORDER BY channel_number").fetchall()
     for row in assigned:
         if row['profile_id']:
-            p, r = get_profile_full_data(conn, row['profile_id'])
-            items.append({'profile': p, 'rows': r})
+            p, r, m = get_profile_full_data(conn, row['profile_id'])
+            items.append({'profile': p, 'rows': r, 'map': m})
     conn.close()
     return render_template('print_worksheet.html', items=items)
 

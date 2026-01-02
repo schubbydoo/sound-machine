@@ -29,6 +29,43 @@
             page-break-after: auto;
         }
         
+        /* Button 4x4 Grid Styles */
+        .button-grid-container {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .button-cell {
+            border: 1px solid #999;
+            border-radius: 8px;
+            padding: 10px;
+            min-height: 80px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            background: #fdfdfd;
+        }
+        .button-number {
+            font-size: 1.4em;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 5px;
+            background: #eee;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .button-content {
+            font-size: 0.9em;
+            word-break: break-word;
+        }
+        
         @media print {
             .no-print { display: none; }
             .key-container { margin-bottom: 0; }
@@ -53,20 +90,43 @@
                 <button onclick="window.print()" style="font-size: 1.1em; padding: 5px 15px;">Print</button>
                 <button onclick="window.close()" style="font-size: 1.1em; padding: 5px 15px;">Close</button>
             </div>
-            <div>
-                <label class="checkbox-group" style="font-weight: bold; color: #0066cc;">
-                    <input type="checkbox" id="cb-grid" onchange="toggleGrid()"> Compact Grid Layout (2 per page)
+            
+            <!-- View Mode Selection -->
+            <div style="margin-bottom: 15px;">
+                <label style="margin-right: 20px;">
+                    <input type="radio" name="viewMode" value="list" onchange="toggleViewMode()" checked> List View
+                </label>
+                <label>
+                    <input type="radio" name="viewMode" value="buttonGrid" onchange="toggleViewMode()"> 4x4 Button Grid
                 </label>
             </div>
-            <hr>
-            <div>
-                <strong>Columns:</strong>
-                <label class="checkbox-group"><input type="checkbox" checked onchange="toggle('channel')" id="cb-channel"> Track</label>
-                <label class="checkbox-group"><input type="checkbox" checked onchange="toggle('btn')" id="cb-btn"> Button</label>
-                <label class="checkbox-group"><input type="checkbox" checked onchange="toggle('desc')" id="cb-desc"> Description</label>
-                <label class="checkbox-group"><input type="checkbox" checked onchange="toggle('cat')" id="cb-cat"> Category</label>
-                <label class="checkbox-group"><input type="checkbox" checked onchange="toggle('hint')" id="cb-hint"> Hint</label>
-                <label class="checkbox-group"><input type="checkbox" checked onchange="toggle('file')" id="cb-file"> Filename</label>
+
+            <!-- List View Controls -->
+            <div id="listViewControls">
+                <label class="checkbox-group" style="font-weight: bold; color: #0066cc;">
+                    <input type="checkbox" id="cb-grid" onchange="toggleGrid()"> Compact List Grid (2 per page)
+                </label>
+                <hr>
+                <div>
+                    <strong>Columns:</strong>
+                    <label class="checkbox-group"><input type="checkbox" checked onchange="toggle('channel')" id="cb-channel"> Track</label>
+                    <label class="checkbox-group"><input type="checkbox" checked onchange="toggle('btn')" id="cb-btn"> Button</label>
+                    <label class="checkbox-group"><input type="checkbox" checked onchange="toggle('desc')" id="cb-desc"> Description</label>
+                    <label class="checkbox-group"><input type="checkbox" checked onchange="toggle('cat')" id="cb-cat"> Category</label>
+                    <label class="checkbox-group"><input type="checkbox" checked onchange="toggle('hint')" id="cb-hint"> Hint</label>
+                    <label class="checkbox-group"><input type="checkbox" checked onchange="toggle('file')" id="cb-file"> Filename</label>
+                </div>
+            </div>
+            
+            <!-- Button Grid Controls -->
+            <div id="buttonGridControls" style="display: none;">
+                <strong>Grid Content:</strong>
+                <select id="gridContentSelect" onchange="updateGridContent()">
+                    <option value="description">Description</option>
+                    <option value="category">Category</option>
+                    <option value="hint">Hint</option>
+                    <option value="filename">Filename</option>
+                </select>
             </div>
         </div>
     </div>
@@ -81,7 +141,8 @@
             </div>
             {% endif %}
             
-            <table class="keyTable">
+            <!-- List View Table -->
+            <table class="keyTable list-view-el">
                 <thead>
                     <tr>
                         <th class="col-channel">Track</th>
@@ -105,11 +166,56 @@
                     {% endfor %}
                 </tbody>
             </table>
+            
+            <!-- 4x4 Button Grid View -->
+            <div class="button-grid-container button-grid-view-el" style="display: none;">
+                {% for i in range(1, 17) %}
+                {% set row = item.map.get(i) %}
+                <div class="button-cell">
+                    <div class="button-number">{{ i }}</div>
+                    <div class="button-content content-description">
+                        {{ row.description if row else '-' }}
+                    </div>
+                    <div class="button-content content-category" style="display:none;">
+                        {{ row.category if row else '-' }}
+                    </div>
+                    <div class="button-content content-hint" style="display:none;">
+                        {{ row.hint if row else '-' }}
+                    </div>
+                    <div class="button-content content-filename" style="display:none;">
+                        {{ row.filename if row else '-' }}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
         </div>
         {% endfor %}
     </div>
 
     <script>
+        function toggleViewMode() {
+            const mode = document.querySelector('input[name="viewMode"]:checked').value;
+            const isList = mode === 'list';
+            
+            document.getElementById('listViewControls').style.display = isList ? 'block' : 'none';
+            document.getElementById('buttonGridControls').style.display = isList ? 'none' : 'block';
+            
+            document.querySelectorAll('.list-view-el').forEach(el => el.style.display = isList ? '' : 'none');
+            document.querySelectorAll('.button-grid-view-el').forEach(el => el.style.display = isList ? 'none' : 'grid');
+            
+            localStorage.setItem('print_key_view_mode', mode);
+        }
+
+        function updateGridContent() {
+            const content = document.getElementById('gridContentSelect').value;
+            // Hide all content divs
+            document.querySelectorAll('.button-content').forEach(el => el.style.display = 'none');
+            // Show selected
+            document.querySelectorAll('.content-' + content).forEach(el => el.style.display = 'block');
+            
+            localStorage.setItem('print_key_grid_content', content);
+        }
+
         function toggleGrid() {
             const isGrid = document.getElementById('cb-grid').checked;
             const container = document.getElementById('profiles-container');
@@ -132,7 +238,24 @@
 
         // Load preferences
         window.onload = function() {
-            // Load Grid Preference
+            // Load View Mode
+            const viewMode = localStorage.getItem('print_key_view_mode');
+            if (viewMode) {
+                const radio = document.querySelector(`input[name="viewMode"][value="${viewMode}"]`);
+                if (radio) {
+                    radio.checked = true;
+                    toggleViewMode();
+                }
+            }
+            
+            // Load Grid Content
+            const gridContent = localStorage.getItem('print_key_grid_content');
+            if (gridContent) {
+                document.getElementById('gridContentSelect').value = gridContent;
+                updateGridContent();
+            }
+
+            // Load Compact Grid Preference
             const gridStored = localStorage.getItem('print_key_grid');
             if (gridStored !== null) {
                 const isGrid = gridStored === 'true';
