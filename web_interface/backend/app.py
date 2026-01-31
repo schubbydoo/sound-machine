@@ -530,37 +530,131 @@ def _compute_trackpack_hash(data):
 
     return hasher.hexdigest()[:16]
 
+
+def _get_trackpack_updated_at(data, db_updated_at=None):
+    """Get the most recent modification time for a trackpack.
+
+    Priority:
+    1. If db_updated_at is provided and valid, use it
+    2. Otherwise, use max(mtime) of audio files in the trackpack
+    3. Falls back to epoch (1970-01-01T00:00:00Z) if no files exist
+
+    Args:
+        data: Trackpack data dict with 'buttons' containing file paths
+        db_updated_at: Optional timestamp string from DB (ISO8601 or SQLite format)
+
+    Returns:
+        ISO 8601 timestamp string (UTC), e.g. "2026-01-31T18:42:10Z"
+    """
+    # Try to use DB timestamp first
+    if db_updated_at:
+        try:
+            # Handle SQLite datetime format (YYYY-MM-DD HH:MM:SS)
+            if 'T' not in str(db_updated_at):
+                dt = datetime.datetime.strptime(str(db_updated_at), '%Y-%m-%d %H:%M:%S')
+                dt = dt.replace(tzinfo=datetime.timezone.utc)
+            else:
+                # Already ISO format
+                dt = datetime.datetime.fromisoformat(str(db_updated_at).replace('Z', '+00:00'))
+            return dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+        except (ValueError, TypeError):
+            pass  # Fall through to file-based calculation
+
+    # Compute from audio file mtimes
+    max_mtime = 0.0
+
+    for btn in data['buttons']:
+        filepath = Path(btn['filepath'])
+        if filepath.exists():
+            try:
+                mtime = filepath.stat().st_mtime
+                if mtime > max_mtime:
+                    max_mtime = mtime
+            except OSError:
+                pass
+
+    if max_mtime > 0:
+        dt = datetime.datetime.fromtimestamp(max_mtime, tz=datetime.timezone.utc)
+    else:
+        # No files or all missing - use epoch as fallback
+        dt = datetime.datetime.fromtimestamp(0, tz=datetime.timezone.utc)
+
+    return dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+def _make_stable_id(track_id):
+    """Generate a stable identifier that won't change even if display_name changes."""
+    return f"trackpack-{track_id}"
+
 @app.route('/api/trackpacks')
 def api_trackpacks():
-    """List available trackpacks (profiles)."""
+    """List available trackpacks (profiles) with versioning metadata.
+
+    Response includes:
+    - id: numeric database ID (for URL compatibility)
+    - name: human-readable name (existing field, preserved for compatibility)
+    - instructions: profile instructions text (existing field)
+    - stable_id: immutable identifier (e.g., "trackpack-13")
+    - revision: content hash that changes when audio/hints/answers/mapping change
+    - updated_at: ISO timestamp of most recent content change
+    """
     conn = get_db()
     try:
         has_profiles = _table_exists(conn, 'profiles')
 
+        # Check for updated_at/modified_at column in profiles table
+        has_updated_at = has_profiles and _column_exists(conn, 'profiles', 'updated_at')
+        has_modified_at = has_profiles and _column_exists(conn, 'profiles', 'modified_at')
+
         if has_profiles:
+            # Build query with optional timestamp column
+            select_cols = "id, name, instructions"
+            if has_updated_at:
+                select_cols += ", updated_at"
+            elif has_modified_at:
+                select_cols += ", modified_at"
             rows = conn.execute(
-                "SELECT id, name, instructions FROM profiles ORDER BY name"
+                f"SELECT {select_cols} FROM profiles ORDER BY name"
             ).fetchall()
-            trackpacks = [
-                {
-                    "id": row['id'],
-                    "name": row['name'] or f"Track {row['id']}",
-                    "instructions": row['instructions'] or ""
-                }
-                for row in rows
-            ]
         else:
             rows = conn.execute(
-                "SELECT DISTINCT profile_id FROM button_mappings ORDER BY profile_id"
+                "SELECT DISTINCT profile_id as id FROM button_mappings ORDER BY profile_id"
             ).fetchall()
-            trackpacks = [
-                {
-                    "id": row['profile_id'],
-                    "name": f"Track {row['profile_id']}",
-                    "instructions": ""
-                }
-                for row in rows
-            ]
+
+        trackpacks = []
+        for row in rows:
+            track_id = row['id'] if has_profiles else row['id']
+
+            # Compute revision and updated_at with error handling
+            revision = None
+            updated_at = None
+            name = row['name'] if has_profiles and row['name'] else f"Track {track_id}"
+            instructions = row['instructions'] if has_profiles and row['instructions'] else ""
+
+            # Get DB timestamp if available
+            db_updated_at = None
+            if has_updated_at:
+                db_updated_at = row['updated_at']
+            elif has_modified_at:
+                db_updated_at = row['modified_at']
+
+            try:
+                data = _get_trackpack_data(conn, track_id)
+                revision = _compute_trackpack_hash(data)
+                updated_at = _get_trackpack_updated_at(data, db_updated_at=db_updated_at)
+                name = data['name']
+                instructions = data['instructions']
+            except Exception as e:
+                print(f"[MSS] Failed to compute revision for trackpack {track_id}: {e}")
+
+            trackpacks.append({
+                "id": track_id,
+                "name": name,
+                "instructions": instructions,
+                "stable_id": _make_stable_id(track_id),
+                "revision": revision,
+                "updated_at": updated_at
+            })
 
         return jsonify({"ok": True, "trackpacks": trackpacks})
     finally:
@@ -568,7 +662,11 @@ def api_trackpacks():
 
 @app.route('/api/trackpacks/<int:track_id>/manifest.json')
 def api_trackpack_manifest(track_id):
-    """Return TrackPack v1 manifest JSON."""
+    """Return TrackPack v1 manifest JSON with versioning metadata.
+
+    The manifest includes stable_id and revision for mobile app sync.
+    The revision here will match the revision embedded in the zip file.
+    """
     conn = get_db()
     try:
         data = _get_trackpack_data(conn, track_id)
@@ -584,9 +682,14 @@ def api_trackpack_manifest(track_id):
         elif not data['buttons']:
             return jsonify({"ok": False, "error": "Track not found"}), 404
 
+        revision = _compute_trackpack_hash(data)
+        stable_id = _make_stable_id(track_id)
+
         manifest = {
             "format": "mss-trackpack",
             "version": 1,
+            "stable_id": stable_id,
+            "revision": revision,
             "track": {
                 "id": data['id'],
                 "name": data['name'],
@@ -610,7 +713,14 @@ def api_trackpack_manifest(track_id):
 
 @app.route('/api/trackpacks/<int:track_id>.zip')
 def api_trackpack_zip(track_id):
-    """Build and serve trackpack as a zip file with caching."""
+    """Build and serve trackpack as a revision-addressed zip file with caching.
+
+    Zip filename format: {stable_id}_{revision}.zip (e.g., trackpack-13_a94c3e1f.zip)
+    This ensures zips are never ambiguous - each revision gets a unique filename.
+
+    Old zip revisions for this trackpack are cleaned up before creating a new one.
+    The manifest inside the zip includes stable_id and revision for verification.
+    """
     conn = get_db()
     try:
         data = _get_trackpack_data(conn, track_id)
@@ -626,54 +736,79 @@ def api_trackpack_zip(track_id):
         elif not data['buttons']:
             return jsonify({"ok": False, "error": "Track not found"}), 404
 
-        # Compute revision hash
+        # Compute revision hash and stable_id
         revision = _compute_trackpack_hash(data)
+        stable_id = _make_stable_id(track_id)
 
         # Ensure exports directory exists
         EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
-        # Check for cached zip
-        zip_filename = f"trackpack_{track_id}_{revision}.zip"
+        # Revision-addressed zip filename: {stable_id}_{revision}.zip
+        zip_filename = f"{stable_id}_{revision}.zip"
         zip_path = EXPORTS_DIR / zip_filename
 
         if not zip_path.exists():
-            # Clean up old versions of this trackpack
-            for old_zip in EXPORTS_DIR.glob(f"trackpack_{track_id}_*.zip"):
-                try:
-                    old_zip.unlink()
-                except:
-                    pass
+            # Clean up old versions of this trackpack (any revision)
+            # Match both old format (trackpack_{id}_*.zip) and new format ({stable_id}_*.zip)
+            cleanup_patterns = [
+                f"trackpack_{track_id}_*.zip",  # Legacy format
+                f"{stable_id}_*.zip"            # New format
+            ]
+            for pattern in cleanup_patterns:
+                for old_zip in EXPORTS_DIR.glob(pattern):
+                    if old_zip != zip_path:  # Don't delete the one we're about to create
+                        try:
+                            old_zip.unlink()
+                        except OSError:
+                            # Log but don't fail - disk may be read-only or file locked
+                            pass
 
-            # Build the zip
-            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-                manifest = {
-                    "format": "mss-trackpack",
-                    "version": 1,
-                    "track": {
-                        "id": data['id'],
-                        "name": data['name'],
-                        "instructions": data['instructions']
-                    },
-                    "buttons": [
-                        {
-                            "button": btn['button'],
-                            "filename": btn['filename'],
-                            "answer": btn['answer'],
-                            "hint": btn['hint'],
-                            "category": btn['category']
-                        }
-                        for btn in data['buttons']
-                    ]
-                }
-                zf.writestr('manifest.json', json.dumps(manifest, indent=2))
+            # Build the zip atomically: write to temp file, then rename
+            # This prevents serving partial zips if process is interrupted
+            temp_zip_path = EXPORTS_DIR / f".tmp_{zip_filename}"
+            try:
+                with zipfile.ZipFile(temp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                    manifest = {
+                        "format": "mss-trackpack",
+                        "version": 1,
+                        "stable_id": stable_id,
+                        "revision": revision,
+                        "track": {
+                            "id": data['id'],
+                            "name": data['name'],
+                            "instructions": data['instructions']
+                        },
+                        "buttons": [
+                            {
+                                "button": btn['button'],
+                                "filename": btn['filename'],
+                                "answer": btn['answer'],
+                                "hint": btn['hint'],
+                                "category": btn['category']
+                            }
+                            for btn in data['buttons']
+                        ]
+                    }
+                    zf.writestr('manifest.json', json.dumps(manifest, indent=2))
 
-                # Add audio files
-                for btn in data['buttons']:
-                    filepath = Path(btn['filepath'])
-                    if filepath.exists():
-                        zf.write(filepath, f"audio/{btn['filename']}")
+                    # Add audio files
+                    for btn in data['buttons']:
+                        filepath = Path(btn['filepath'])
+                        if filepath.exists():
+                            zf.write(filepath, f"audio/{btn['filename']}")
 
-        # Serve the zip
+                # Atomic rename (on POSIX systems)
+                temp_zip_path.rename(zip_path)
+            except Exception:
+                # Clean up temp file on failure
+                if temp_zip_path.exists():
+                    try:
+                        temp_zip_path.unlink()
+                    except OSError:
+                        pass
+                raise
+
+        # Serve the zip with human-readable download name
         safe_name = data['name'].replace(' ', '_').replace('/', '_')[:50]
         download_name = f"{safe_name}.zip"
 
