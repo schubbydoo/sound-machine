@@ -33,3 +33,5 @@ Sounds/**
 
 # Runtime
 *.pid
+.claude/
+data/
