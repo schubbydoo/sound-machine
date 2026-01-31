@@ -65,6 +65,7 @@ def _read_host_commands():
 
 # Main loop: scan buttons, report presses
 print("Sound Machine Pico firmware started")
+loop_count = 0
 while True:
     now_ms = time.ticks_ms()
     # Read a potential host command each cycle
@@ -84,4 +85,12 @@ while True:
                         sys.stdout.flush()
                     except Exception:
                         pass
-    time.sleep_ms(10)
+    
+    # Longer sleep to allow remote access - button detection still responsive
+    # at ~50Hz (20ms) which is more than enough for button presses
+    time.sleep_ms(20)
+    
+    # Every 100 loops (~2 seconds), do a longer pause to allow REPL access
+    loop_count += 1
+    if loop_count % 100 == 0:
+        time.sleep_ms(50)  # Extra pause every 2 seconds for remote access

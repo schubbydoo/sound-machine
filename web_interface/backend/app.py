@@ -10,6 +10,9 @@ import datetime
 import threading
 import subprocess
 import shlex
+import time
+import hashlib
+import zipfile
 from pathlib import Path
 from flask import Flask, render_template, request, jsonify, send_file, Response
 
@@ -23,6 +26,7 @@ import backend.network_utils as nu
 APP_ROOT = Path('/home/soundconsole/sound-machine')
 DB_PATH = APP_ROOT / 'data' / 'sound_machine.db'
 SOUNDS_ROOT = APP_ROOT / 'Sounds'
+EXPORTS_DIR = APP_ROOT / 'data' / 'exports'
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500 MB limit
@@ -430,6 +434,258 @@ def print_worksheet_assigned():
     conn.close()
     return render_template('print_worksheet.html', items=items)
 
+# ---------------- TrackPack Export API ----------------
+
+def _table_exists(conn, table_name):
+    """Check if a table exists in the database."""
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+        (table_name,)
+    ).fetchone()
+    return row is not None
+
+def _column_exists(conn, table_name, column_name):
+    """Check if a column exists in a table."""
+    try:
+        cursor = conn.execute(f"PRAGMA table_info({table_name})")
+        columns = [row[1] for row in cursor.fetchall()]
+        return column_name in columns
+    except:
+        return False
+
+def _get_trackpack_data(conn, track_id):
+    """Get trackpack data for a given profile/track ID."""
+    has_profiles = _table_exists(conn, 'profiles')
+
+    name = f"Track {track_id}"
+    instructions = ""
+
+    if has_profiles:
+        profile = conn.execute(
+            "SELECT name, instructions FROM profiles WHERE id = ?",
+            (track_id,)
+        ).fetchone()
+        if profile:
+            name = profile['name'] or name
+            instructions = profile['instructions'] or ""
+
+    # Check which columns exist in audio_files
+    has_description = _column_exists(conn, 'audio_files', 'description')
+    has_hint = _column_exists(conn, 'audio_files', 'hint')
+    has_category = _column_exists(conn, 'audio_files', 'category')
+
+    # Build SELECT clause based on available columns
+    select_cols = ["bm.button_id", "af.filename", "af.filepath"]
+    if has_description:
+        select_cols.append("af.description")
+    if has_hint:
+        select_cols.append("af.hint")
+    if has_category:
+        select_cols.append("af.category")
+
+    query = f"""
+        SELECT {', '.join(select_cols)}
+        FROM button_mappings bm
+        JOIN audio_files af ON bm.audio_file_id = af.id
+        WHERE bm.profile_id = ?
+        ORDER BY bm.button_id ASC
+    """
+
+    rows = conn.execute(query, (track_id,)).fetchall()
+
+    buttons = []
+    for row in rows:
+        btn = {
+            "button": row['button_id'],
+            "filename": row['filename'],
+            "filepath": row['filepath'],
+            "answer": (row['description'] if has_description else "") or "",
+            "hint": (row['hint'] if has_hint else "") or "",
+            "category": (row['category'] if has_category else "") or ""
+        }
+        buttons.append(btn)
+
+    return {
+        "id": track_id,
+        "name": name,
+        "instructions": instructions,
+        "buttons": buttons
+    }
+
+def _compute_trackpack_hash(data):
+    """Compute a revision hash based on DB mapping + audio file mtimes/sizes."""
+    hasher = hashlib.sha256()
+
+    # Include track metadata
+    hasher.update(f"{data['id']}:{data['name']}:{data['instructions']}".encode('utf-8'))
+
+    # Include button mappings and file stats
+    for btn in data['buttons']:
+        hasher.update(f"{btn['button']}:{btn['filename']}:{btn['answer']}:{btn['hint']}:{btn['category']}".encode('utf-8'))
+
+        filepath = Path(btn['filepath'])
+        if filepath.exists():
+            stat = filepath.stat()
+            hasher.update(f":{stat.st_mtime}:{stat.st_size}".encode('utf-8'))
+
+    return hasher.hexdigest()[:16]
+
+@app.route('/api/trackpacks')
+def api_trackpacks():
+    """List available trackpacks (profiles)."""
+    conn = get_db()
+    try:
+        has_profiles = _table_exists(conn, 'profiles')
+
+        if has_profiles:
+            rows = conn.execute(
+                "SELECT id, name, instructions FROM profiles ORDER BY name"
+            ).fetchall()
+            trackpacks = [
+                {
+                    "id": row['id'],
+                    "name": row['name'] or f"Track {row['id']}",
+                    "instructions": row['instructions'] or ""
+                }
+                for row in rows
+            ]
+        else:
+            rows = conn.execute(
+                "SELECT DISTINCT profile_id FROM button_mappings ORDER BY profile_id"
+            ).fetchall()
+            trackpacks = [
+                {
+                    "id": row['profile_id'],
+                    "name": f"Track {row['profile_id']}",
+                    "instructions": ""
+                }
+                for row in rows
+            ]
+
+        return jsonify({"ok": True, "trackpacks": trackpacks})
+    finally:
+        conn.close()
+
+@app.route('/api/trackpacks/<int:track_id>/manifest.json')
+def api_trackpack_manifest(track_id):
+    """Return TrackPack v1 manifest JSON."""
+    conn = get_db()
+    try:
+        data = _get_trackpack_data(conn, track_id)
+
+        # Check if track exists (has buttons or profile)
+        has_profiles = _table_exists(conn, 'profiles')
+        if has_profiles:
+            profile = conn.execute(
+                "SELECT id FROM profiles WHERE id = ?", (track_id,)
+            ).fetchone()
+            if not profile and not data['buttons']:
+                return jsonify({"ok": False, "error": "Track not found"}), 404
+        elif not data['buttons']:
+            return jsonify({"ok": False, "error": "Track not found"}), 404
+
+        manifest = {
+            "format": "mss-trackpack",
+            "version": 1,
+            "track": {
+                "id": data['id'],
+                "name": data['name'],
+                "instructions": data['instructions']
+            },
+            "buttons": [
+                {
+                    "button": btn['button'],
+                    "filename": btn['filename'],
+                    "answer": btn['answer'],
+                    "hint": btn['hint'],
+                    "category": btn['category']
+                }
+                for btn in data['buttons']
+            ]
+        }
+
+        return jsonify(manifest)
+    finally:
+        conn.close()
+
+@app.route('/api/trackpacks/<int:track_id>.zip')
+def api_trackpack_zip(track_id):
+    """Build and serve trackpack as a zip file with caching."""
+    conn = get_db()
+    try:
+        data = _get_trackpack_data(conn, track_id)
+
+        # Check if track exists
+        has_profiles = _table_exists(conn, 'profiles')
+        if has_profiles:
+            profile = conn.execute(
+                "SELECT id FROM profiles WHERE id = ?", (track_id,)
+            ).fetchone()
+            if not profile and not data['buttons']:
+                return jsonify({"ok": False, "error": "Track not found"}), 404
+        elif not data['buttons']:
+            return jsonify({"ok": False, "error": "Track not found"}), 404
+
+        # Compute revision hash
+        revision = _compute_trackpack_hash(data)
+
+        # Ensure exports directory exists
+        EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Check for cached zip
+        zip_filename = f"trackpack_{track_id}_{revision}.zip"
+        zip_path = EXPORTS_DIR / zip_filename
+
+        if not zip_path.exists():
+            # Clean up old versions of this trackpack
+            for old_zip in EXPORTS_DIR.glob(f"trackpack_{track_id}_*.zip"):
+                try:
+                    old_zip.unlink()
+                except:
+                    pass
+
+            # Build the zip
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                manifest = {
+                    "format": "mss-trackpack",
+                    "version": 1,
+                    "track": {
+                        "id": data['id'],
+                        "name": data['name'],
+                        "instructions": data['instructions']
+                    },
+                    "buttons": [
+                        {
+                            "button": btn['button'],
+                            "filename": btn['filename'],
+                            "answer": btn['answer'],
+                            "hint": btn['hint'],
+                            "category": btn['category']
+                        }
+                        for btn in data['buttons']
+                    ]
+                }
+                zf.writestr('manifest.json', json.dumps(manifest, indent=2))
+
+                # Add audio files
+                for btn in data['buttons']:
+                    filepath = Path(btn['filepath'])
+                    if filepath.exists():
+                        zf.write(filepath, f"audio/{btn['filename']}")
+
+        # Serve the zip
+        safe_name = data['name'].replace(' ', '_').replace('/', '_')[:50]
+        download_name = f"{safe_name}.zip"
+
+        return send_file(
+            zip_path,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name=download_name
+        )
+    finally:
+        conn.close()
+
 # ---------------- Network Routes ----------------
 
 @app.route('/wifi')
@@ -568,59 +824,86 @@ def bt_forget_route():
 
 @app.post('/play/<int:button_id>')
 def play(button_id: int):
-    # This route is for testing via UI
-    # We should query DB for the active profile (hardware active channel if not specified?)
-    # Or should the UI play the sound associated with the *displayed* profile?
-    # Usually UI play testing should play what's on the screen.
-    # But current app logic had `get_effects_mapping` using `activeProfile` from config.
-    
-    # We'll use the profile passed in query param or active channel?
-    # UI should probably pass the file path or ID directly if testing a specific assignment.
-    # But let's stick to button ID for now. 
-    # Let's assume testing the *Hardware Active* profile if no profile_id is implicit?
-    # Or better: UI usually sends button ID.
-    
-    # Let's fetch the audio for this button on the ACTIVE CHANNEL (Hardware) to simulate real press
-    # OR fetch for the requested profile if we want to preview edits.
-    # Existing app used `activeProfile`.
-    
-    # Let's see if we can get profile_id from request?
-    # If not, use hardware active.
-    
+    """Play audio for a button. Uses profile_id from query param or active channel."""
     conn = get_db()
     
-    # Try to find what file is mapped
-    # If we want to support previewing the profile being edited:
-    profile_id = request.args.get('profile_id')
-    
-    if not profile_id:
-        # Fallback to hardware active
-        chn = get_system_config('active_channel', '1')
-        row = conn.execute("SELECT profile_id FROM channels WHERE channel_number = ?", (chn,)).fetchone()
-        profile_id = row['profile_id'] if row else None
+    try:
+        # Get profile_id from query param (as string) and convert to int
+        profile_id_str = request.args.get('profile_id')
+        profile_id = None
         
-    path = None
-    if profile_id:
+        if profile_id_str:
+            try:
+                profile_id = int(profile_id_str)
+            except (ValueError, TypeError):
+                conn.close()
+                return jsonify({'ok': False, 'error': 'Invalid profile_id'}), 400
+        
+        if not profile_id:
+            # Fallback to hardware active channel
+            chn = get_system_config('active_channel', '1')
+            try:
+                chn = int(chn)
+            except (ValueError, TypeError):
+                chn = 1
+            row = conn.execute("SELECT profile_id FROM channels WHERE channel_number = ?", (chn,)).fetchone()
+            profile_id = row['profile_id'] if row else None
+            
+        if not profile_id:
+            conn.close()
+            return jsonify({'ok': False, 'error': 'No profile found for button'}), 400
+            
+        # Query for the audio file
         row = conn.execute("""
-            SELECT af.filepath 
+            SELECT af.filepath, af.filename
             FROM button_mappings bm
             JOIN audio_files af ON bm.audio_file_id = af.id
             WHERE bm.profile_id = ? AND bm.button_id = ?
         """, (profile_id, button_id)).fetchone()
-        if row: path = row['filepath']
         
-    conn.close()
-    
-    if not path or not os.path.exists(path):
-        return jsonify({'ok': False, 'error': 'No file mapped'}), 400
+        if not row:
+            conn.close()
+            return jsonify({'ok': False, 'error': f'No audio file mapped to button {button_id}'}), 400
+            
+        path = row['filepath']
+        filename = row['filename']
         
-    aplay_device = get_system_config('aplayDevice', 'default')
-    cmd = ['aplay', '-q', '-D', aplay_device, path]
-    try:
-        subprocess.Popen(cmd) # Fire and forget for UI test
-        return jsonify({'ok': True})
+        if not path or not os.path.exists(path):
+            conn.close()
+            return jsonify({'ok': False, 'error': f'Audio file not found: {filename}'}), 400
+            
+        # Get audio device and play
+        aplay_device = get_system_config('aplayDevice', 'default')
+        cmd = ['aplay', '-q', '-D', str(aplay_device), str(path)]
+        
+        # Check if aplay exists
+        if not shutil.which('aplay'):
+            conn.close()
+            return jsonify({'ok': False, 'error': 'aplay command not found'}), 500
+        
+        # Run aplay and capture any immediate errors
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            # Give it a moment to start and check for immediate errors
+            time.sleep(0.1)
+            if process.poll() is not None:
+                # Process exited immediately (error)
+                stdout, stderr = process.communicate()
+                error_msg = stderr.strip() or stdout.strip() or 'aplay failed to start'
+                return jsonify({'ok': False, 'error': f'aplay error: {error_msg}'}), 500
+            
+            return jsonify({'ok': True, 'filename': filename})
+        except Exception as e:
+            return jsonify({'ok': False, 'error': f'Failed to play audio: {str(e)}'}), 500
     except Exception as e:
-        return jsonify({'ok': False, 'error': str(e)}), 500
+        return jsonify({'ok': False, 'error': f'Unexpected error: {str(e)}'}), 500
+    finally:
+        conn.close()
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080, debug=False)

@@ -35,11 +35,15 @@ NO_SOUND_FILE = Path("/home/soundconsole/sound-machine/Sounds/system/not_assigne
 
 def get_db_connection():
     try:
-        conn = sqlite3.connect(DB_PATH)
+        # Use timeout to handle database locks
+        conn = sqlite3.connect(DB_PATH, timeout=5.0)
         conn.row_factory = sqlite3.Row
         return conn
+    except sqlite3.OperationalError as e:
+        print(f"DB Connection Error (lock/timeout): {e}", file=sys.stderr, flush=True)
+        return None
     except Exception as e:
-        print(f"DB Connection Error: {e}", file=sys.stderr)
+        print(f"DB Connection Error: {e}", file=sys.stderr, flush=True)
         return None
 
 
@@ -65,6 +69,7 @@ def get_audio_path(btn_id: int) -> Optional[Path]:
     """
     conn = get_db_connection()
     if not conn:
+        print(f"ERROR: Could not connect to database for button {btn_id}", file=sys.stderr, flush=True)
         return None
     
     try:
@@ -74,21 +79,31 @@ def get_audio_path(btn_id: int) -> Optional[Path]:
         cursor.execute("SELECT value FROM system_config WHERE key = 'active_channel'")
         row = cursor.fetchone()
         if not row:
+            print(f"ERROR: No active_channel configured for button {btn_id}", file=sys.stderr, flush=True)
             return None
-        active_channel = int(row['value'])
+        try:
+            active_channel = int(row['value'])
+        except (ValueError, TypeError) as e:
+            print(f"ERROR: Invalid active_channel value '{row['value']}': {e}", file=sys.stderr, flush=True)
+            return None
         
         # 2. Get profile for channel
         cursor.execute("SELECT profile_id FROM channels WHERE channel_number = ?", (active_channel,))
         row = cursor.fetchone()
-        if not row:
-            # Channel not configured or no profile
+        if not row or row['profile_id'] is None:
+            print(f"ERROR: No profile assigned to channel {active_channel} for button {btn_id}", file=sys.stderr, flush=True)
             return None
-        profile_id = row['profile_id']
+        
+        try:
+            profile_id = int(row['profile_id'])
+        except (ValueError, TypeError) as e:
+            print(f"ERROR: Invalid profile_id '{row['profile_id']}' for channel {active_channel}: {e}", file=sys.stderr, flush=True)
+            return None
         
         # 3. Get audio file for button in profile
         cursor.execute(
             """
-            SELECT a.filepath 
+            SELECT a.filepath, a.filename
             FROM button_mappings bm
             JOIN audio_files a ON bm.audio_file_id = a.id
             WHERE bm.profile_id = ? AND bm.button_id = ?
@@ -97,13 +112,29 @@ def get_audio_path(btn_id: int) -> Optional[Path]:
         )
         row = cursor.fetchone()
         
-        if row and row['filepath']:
-            return Path(row['filepath'])
+        if not row:
+            # Debug: Check what buttons ARE mapped
+            cursor.execute("SELECT button_id FROM button_mappings WHERE profile_id = ?", (profile_id,))
+            all_mapped = [r['button_id'] for r in cursor.fetchall()]
+            print(f"ERROR: No audio file mapped to button {btn_id} in profile {profile_id} (channel {active_channel})", file=sys.stderr, flush=True)
+            print(f"DEBUG: Buttons mapped in profile {profile_id}: {sorted(all_mapped)}", file=sys.stderr, flush=True)
+            return None
         
-        return None
+        if not row['filepath']:
+            print(f"ERROR: Empty filepath for button {btn_id} in profile {profile_id}", file=sys.stderr, flush=True)
+            return None
+        
+        filepath = Path(row['filepath'])
+        if not filepath.exists():
+            print(f"ERROR: Audio file does not exist: {filepath} (button {btn_id}, profile {profile_id})", file=sys.stderr, flush=True)
+            return None
+        
+        return filepath
         
     except Exception as e:
-        print(f"DB Query Error: {e}", file=sys.stderr)
+        print(f"DB Query Error for button {btn_id}: {e}", file=sys.stderr, flush=True)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
         return None
     finally:
         conn.close()
@@ -150,8 +181,10 @@ def resolve_serial_port(preferred: str) -> Optional[str]:
 
 
 def check_audio_device(device: str) -> bool:
-    """Check if audio device is available"""
+    """Check if audio device is available - less strict check"""
     try:
+        # Just check if aplay command exists and works in general
+        # Don't check specific device as it may be temporarily busy
         result = subprocess.run(
             ["aplay", "-l"],
             capture_output=True,
@@ -160,7 +193,9 @@ def check_audio_device(device: str) -> bool:
         )
         return result.returncode == 0
     except Exception:
-        return False
+        # If aplay check fails, still return True to allow playback attempt
+        # The actual playback will fail gracefully if device is truly unavailable
+        return True
 
 
 def send_button_event_to_led_daemon(btn_id: int) -> None:
@@ -197,10 +232,8 @@ def play_wav_interruptible(wav_path: Path, device: str, current_process: Optiona
         print(f"WAV not found: {wav_path}", file=sys.stderr)
         return None
     
-    # Check if audio device is available
-    if not check_audio_device(device):
-        print(f"ERROR: Audio device '{device}' not available", file=sys.stderr)
-        return None
+    # Note: We don't check audio device here as it may be temporarily busy
+    # The actual aplay command will fail gracefully if device is unavailable
     
     # Force kill any stuck process
     if current_process:
@@ -344,12 +377,17 @@ def main() -> int:
                     
                     m = PRESS_RE.match(line)
                     if not m:
+                        if line.strip() and not line.strip().startswith('Alive:'):  # Only log non-empty lines that don't match (skip watchdog)
+                            print(f"DEBUG: Unmatched line: {repr(line)}", file=sys.stderr, flush=True)
                         continue
 
                     btn_id = int(m.group(1))
+                    print(f"DEBUG: Button {btn_id} pressed (raw line: {repr(line)})", file=sys.stderr, flush=True)
+                    print(f"DEBUG: Button {btn_id} pressed", flush=True)
                     now_ms = time.time() * 1000.0
                     last_ms = last_press_ts.get(btn_id, 0.0)
                     if (now_ms - last_ms) < debounce_ms:
+                        print(f"DEBUG: Button {btn_id} debounced (last press {now_ms - last_ms:.1f}ms ago)", file=sys.stderr, flush=True)
                         continue
                     last_press_ts[btn_id] = now_ms
                     
@@ -357,13 +395,18 @@ def main() -> int:
                         cleanup_debounce_dict()
 
                     # QUERY DB FOR AUDIO
+                    print(f"DEBUG: Querying database for button {btn_id}", file=sys.stderr, flush=True)
                     wav_path = get_audio_path(btn_id)
+                    print(f"DEBUG: Database returned for button {btn_id}: {wav_path}", file=sys.stderr, flush=True)
                     
                     if not wav_path:
+                        print(f"No audio assigned for button {btn_id} on active profile", file=sys.stderr, flush=True)
                         print(f"No audio assigned for button {btn_id} on active profile", flush=True)
                         if NO_SOUND_FILE.exists():
                              wav_path = NO_SOUND_FILE
+                             print(f"Playing placeholder sound for button {btn_id}", flush=True)
                         else:
+                             print(f"ERROR: No audio file and placeholder not found for button {btn_id}", file=sys.stderr, flush=True)
                              continue
 
                     try:

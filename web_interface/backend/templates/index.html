@@ -362,12 +362,19 @@
 
 <script>
 // File input name update
-const fileInput = document.querySelector('#fileInput');
-fileInput.onchange = () => {
-  if (fileInput.files.length > 0) {
-    document.querySelector('#fileName').textContent = fileInput.files.length + ' files selected';
-  }
-}
+document.addEventListener('DOMContentLoaded', () => {
+    const fileInput = document.querySelector('#fileInput');
+    if (fileInput) {
+        fileInput.onchange = () => {
+            if (fileInput.files.length > 0) {
+                const fileNameEl = document.querySelector('#fileName');
+                if (fileNameEl) {
+                    fileNameEl.textContent = fileInput.files.length + ' files selected';
+                }
+            }
+        };
+    }
+});
 
 function switchProfile(id) {
     window.location.href = '/?profile_id=' + id;
@@ -407,15 +414,16 @@ async function deleteProfile() {
 }
 
 // Profile Instructions
+let currentProfileInstructions = '';
 {% for p in profiles %}
     {% if p.id == active_profile_id %}
-    const currentProfileInstructions = {{ p.instructions | tojson or '""' }};
+    currentProfileInstructions = {{ p.instructions | tojson or '""' }};
     {% endif %}
 {% endfor %}
 
 // Initialize UI
 document.addEventListener('DOMContentLoaded', () => {
-    if (typeof currentProfileInstructions !== 'undefined' && currentProfileInstructions) {
+    if (currentProfileInstructions) {
         document.getElementById('descText').innerText = currentProfileInstructions;
         document.getElementById('descriptionDisplay').style.display = 'block';
     }
@@ -489,11 +497,35 @@ async function assignButton(btnId, audioId) {
 }
 
 async function play(btnId) {
+    console.log('Play button clicked:', btnId);
     try {
+        // Get the active profile ID from the select dropdown (in case user switched profiles)
+        const profileSelect = document.getElementById('profileSelect');
+        const profileId = profileSelect ? profileSelect.value : '{{ active_profile_id }}';
+        console.log('Using profile_id:', profileId);
+        
+        if (!profileId) {
+            alert('No profile selected. Please select a profile first.');
+            return;
+        }
+        
         // Pass active profile so we test what we see
-        await fetch(`/play/${btnId}?profile_id={{ active_profile_id }}`, {method: 'POST'});
+        const url = `/play/${btnId}?profile_id=${profileId}`;
+        console.log('Fetching URL:', url);
+        const response = await fetch(url, {method: 'POST'});
+        console.log('Response status:', response.status);
+        const result = await response.json();
+        console.log('Response result:', result);
+        
+        if (!result.ok) {
+            alert(`Error playing button ${btnId}: ${result.error || 'Unknown error'}`);
+            console.error('Play error:', result);
+        } else {
+            console.log('Play successful:', result.filename);
+        }
     } catch(e) {
-        console.error(e);
+        alert(`Failed to play button ${btnId}: ${e.message}`);
+        console.error('Play exception:', e);
     }
 }
 
