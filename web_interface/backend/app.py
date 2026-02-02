@@ -21,12 +21,15 @@ try:
 except ImportError:
     from werkzeug.utils import secure_filename
 
-import backend.network_utils as nu
+from . import network_utils as nu
+from .storage import get_storage_adapter, get_trackpack_updated_at as storage_get_updated_at
+from .server_identity import get_server_id, get_server_name
 
 APP_ROOT = Path('/home/soundconsole/sound-machine')
 DB_PATH = APP_ROOT / 'data' / 'sound_machine.db'
 SOUNDS_ROOT = APP_ROOT / 'Sounds'
 EXPORTS_DIR = APP_ROOT / 'data' / 'exports'
+DATA_DIR = APP_ROOT / 'data'
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500 MB limit
@@ -512,74 +515,65 @@ def _get_trackpack_data(conn, track_id):
         "buttons": buttons
     }
 
-def _compute_trackpack_hash(data):
-    """Compute a revision hash based on DB mapping + audio file mtimes/sizes."""
+def _compute_trackpack_hash(data, adapter=None):
+    """Compute a revision hash based on DB mapping + audio file mtimes/sizes.
+
+    Args:
+        data: Trackpack data dict from _get_trackpack_data()
+        adapter: Storage adapter (uses default if not provided)
+
+    Returns:
+        16-character hex hash string
+    """
+    if adapter is None:
+        adapter = get_storage_adapter()
+
     hasher = hashlib.sha256()
 
     # Include track metadata
     hasher.update(f"{data['id']}:{data['name']}:{data['instructions']}".encode('utf-8'))
 
-    # Include button mappings and file stats
+    # Include button mappings and file stats (via storage adapter)
     for btn in data['buttons']:
         hasher.update(f"{btn['button']}:{btn['filename']}:{btn['answer']}:{btn['hint']}:{btn['category']}".encode('utf-8'))
 
-        filepath = Path(btn['filepath'])
-        if filepath.exists():
-            stat = filepath.stat()
-            hasher.update(f":{stat.st_mtime}:{stat.st_size}".encode('utf-8'))
+        meta = adapter.get_file_metadata(btn['filepath'])
+        if meta:
+            hasher.update(f":{meta.mtime}:{meta.size}".encode('utf-8'))
 
     return hasher.hexdigest()[:16]
 
 
-def _get_trackpack_updated_at(data, db_updated_at=None):
+def _get_trackpack_updated_at(data, db_updated_at=None, db_created_at=None, adapter=None):
     """Get the most recent modification time for a trackpack.
 
+    Delegates to storage module's get_trackpack_updated_at() for consistent
+    timestamp logic across the codebase.
+
     Priority:
-    1. If db_updated_at is provided and valid, use it
-    2. Otherwise, use max(mtime) of audio files in the trackpack
-    3. Falls back to epoch (1970-01-01T00:00:00Z) if no files exist
+    1. db_updated_at if valid
+    2. max(mtime) of audio files (via adapter)
+    3. db_created_at if valid
+    4. Current time as last resort
+
+    Note: mtime is checked before created_at because older MSS schemas lack
+    updated_at, but file mtimes still reflect actual content changes.
 
     Args:
         data: Trackpack data dict with 'buttons' containing file paths
-        db_updated_at: Optional timestamp string from DB (ISO8601 or SQLite format)
+        db_updated_at: Optional updated_at from DB (ISO8601 or SQLite format)
+        db_created_at: Optional created_at from DB (ISO8601 or SQLite format)
+        adapter: Storage adapter (uses default if not provided)
 
     Returns:
         ISO 8601 timestamp string (UTC), e.g. "2026-01-31T18:42:10Z"
     """
-    # Try to use DB timestamp first
-    if db_updated_at:
-        try:
-            # Handle SQLite datetime format (YYYY-MM-DD HH:MM:SS)
-            if 'T' not in str(db_updated_at):
-                dt = datetime.datetime.strptime(str(db_updated_at), '%Y-%m-%d %H:%M:%S')
-                dt = dt.replace(tzinfo=datetime.timezone.utc)
-            else:
-                # Already ISO format
-                dt = datetime.datetime.fromisoformat(str(db_updated_at).replace('Z', '+00:00'))
-            return dt.strftime('%Y-%m-%dT%H:%M:%SZ')
-        except (ValueError, TypeError):
-            pass  # Fall through to file-based calculation
-
-    # Compute from audio file mtimes
-    max_mtime = 0.0
-
-    for btn in data['buttons']:
-        filepath = Path(btn['filepath'])
-        if filepath.exists():
-            try:
-                mtime = filepath.stat().st_mtime
-                if mtime > max_mtime:
-                    max_mtime = mtime
-            except OSError:
-                pass
-
-    if max_mtime > 0:
-        dt = datetime.datetime.fromtimestamp(max_mtime, tz=datetime.timezone.utc)
-    else:
-        # No files or all missing - use epoch as fallback
-        dt = datetime.datetime.fromtimestamp(0, tz=datetime.timezone.utc)
-
-    return dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+    return storage_get_updated_at(
+        data,
+        db_updated_at=db_updated_at,
+        db_created_at=db_created_at,
+        adapter=adapter
+    )
 
 
 def _make_stable_id(track_id):
@@ -602,17 +596,20 @@ def api_trackpacks():
     try:
         has_profiles = _table_exists(conn, 'profiles')
 
-        # Check for updated_at/modified_at column in profiles table
+        # Check for timestamp columns in profiles table
         has_updated_at = has_profiles and _column_exists(conn, 'profiles', 'updated_at')
         has_modified_at = has_profiles and _column_exists(conn, 'profiles', 'modified_at')
+        has_created_at = has_profiles and _column_exists(conn, 'profiles', 'created_at')
 
         if has_profiles:
-            # Build query with optional timestamp column
+            # Build query with optional timestamp columns
             select_cols = "id, name, instructions"
             if has_updated_at:
                 select_cols += ", updated_at"
             elif has_modified_at:
                 select_cols += ", modified_at"
+            if has_created_at:
+                select_cols += ", created_at"
             rows = conn.execute(
                 f"SELECT {select_cols} FROM profiles ORDER BY name"
             ).fetchall()
@@ -631,17 +628,26 @@ def api_trackpacks():
             name = row['name'] if has_profiles and row['name'] else f"Track {track_id}"
             instructions = row['instructions'] if has_profiles and row['instructions'] else ""
 
-            # Get DB timestamp if available
+            # Get DB timestamps if available
             db_updated_at = None
+            db_created_at = None
             if has_updated_at:
                 db_updated_at = row['updated_at']
             elif has_modified_at:
                 db_updated_at = row['modified_at']
+            if has_created_at:
+                db_created_at = row['created_at']
 
             try:
                 data = _get_trackpack_data(conn, track_id)
-                revision = _compute_trackpack_hash(data)
-                updated_at = _get_trackpack_updated_at(data, db_updated_at=db_updated_at)
+                adapter = get_storage_adapter()
+                revision = _compute_trackpack_hash(data, adapter=adapter)
+                updated_at = _get_trackpack_updated_at(
+                    data,
+                    db_updated_at=db_updated_at,
+                    db_created_at=db_created_at,
+                    adapter=adapter
+                )
                 name = data['name']
                 instructions = data['instructions']
             except Exception as e:
@@ -682,7 +688,8 @@ def api_trackpack_manifest(track_id):
         elif not data['buttons']:
             return jsonify({"ok": False, "error": "Track not found"}), 404
 
-        revision = _compute_trackpack_hash(data)
+        adapter = get_storage_adapter()
+        revision = _compute_trackpack_hash(data, adapter=adapter)
         stable_id = _make_stable_id(track_id)
 
         manifest = {
@@ -736,8 +743,11 @@ def api_trackpack_zip(track_id):
         elif not data['buttons']:
             return jsonify({"ok": False, "error": "Track not found"}), 404
 
+        # Get storage adapter for file operations
+        adapter = get_storage_adapter()
+
         # Compute revision hash and stable_id
-        revision = _compute_trackpack_hash(data)
+        revision = _compute_trackpack_hash(data, adapter=adapter)
         stable_id = _make_stable_id(track_id)
 
         # Ensure exports directory exists
@@ -791,11 +801,11 @@ def api_trackpack_zip(track_id):
                     }
                     zf.writestr('manifest.json', json.dumps(manifest, indent=2))
 
-                    # Add audio files
+                    # Add audio files (read through storage adapter)
                     for btn in data['buttons']:
-                        filepath = Path(btn['filepath'])
-                        if filepath.exists():
-                            zf.write(filepath, f"audio/{btn['filename']}")
+                        file_bytes = adapter.read_file_bytes(btn['filepath'])
+                        if file_bytes is not None:
+                            zf.writestr(f"audio/{btn['filename']}", file_bytes)
 
                 # Atomic rename (on POSIX systems)
                 temp_zip_path.rename(zip_path)
@@ -820,6 +830,32 @@ def api_trackpack_zip(track_id):
         )
     finally:
         conn.close()
+
+# ---------------- Server Identity API ----------------
+
+@app.route('/api/server-info')
+def api_server_info():
+    """Return server identity and capabilities.
+
+    Provides stable identification for this MSS instance, useful for:
+    - Client pairing and recognition
+    - Multi-device coordination
+    - Future cloud sync features
+
+    The server_id is persistent across restarts and reboots.
+    """
+    return jsonify({
+        "ok": True,
+        "server_id": get_server_id(DATA_DIR),
+        "server_name": get_server_name(DATA_DIR),
+        "server_type": "local",
+        "api_version": "v1",
+        "capabilities": {
+            "trackpacks": True,
+            "updates": True,
+            "cloud_ready": True
+        }
+    })
 
 # ---------------- Network Routes ----------------
 
