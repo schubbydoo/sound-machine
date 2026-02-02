@@ -10,6 +10,25 @@
     .audio-row { align-items: center; }
     .is-clickable { cursor: pointer; }
     .channel-badge { margin-left: 0.5rem; }
+    /* Inline edit styles */
+    .inline-edit-input {
+      font-size: 0.75rem;
+      padding: 0.25rem 0.5rem;
+      border: 1px solid #dbdbdb;
+      border-radius: 4px;
+      background: #fafafa;
+      width: 100%;
+      margin-bottom: 0.25rem;
+    }
+    .inline-edit-input:focus {
+      border-color: #3273dc;
+      outline: none;
+      background: #fff;
+    }
+    .view-mode, .edit-mode { display: block; }
+    .edit-mode { display: none; }
+    tr.is-editing .view-mode { display: none; }
+    tr.is-editing .edit-mode { display: block; }
   </style>
 </head>
 <body>
@@ -33,7 +52,7 @@
     
     <!-- Profile Management -->
     <div class="box">
-        <h2 class="title is-4">Profile Management</h2>
+        <h2 class="title is-4">Track Management</h2>
         
         <!-- Row 1: Profile Selection and Assignment -->
         <div class="level mb-2">
@@ -66,7 +85,7 @@
                 <div class="level-item">
                     <button class="button is-success is-light" onclick="createProfile()">
                         <span class="icon"><i class="fas fa-plus"></i></span>
-                        <span>New Profile</span>
+                        <span>New Track</span>
                     </button>
                 </div>
             </div>
@@ -207,14 +226,14 @@
                     <tr>
                         <th width="50">#</th>
                         <th>Assigned Audio</th>
-                        <th>Description / Category</th>
+                        <th>Description / Hint</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for i in range(1, 17) %}
                     {% set m = mappings.get(i) %}
-                    <tr>
+                    <tr id="row-{{ i }}" data-audio-id="{{ m.audio_id if m else '' }}" data-category="{{ m.category or '' if m else '' }}">
                         <td class="is-vcentered"><strong>{{ i }}</strong></td>
                         <td class="is-vcentered">
                             <div class="select is-fullwidth">
@@ -230,8 +249,14 @@
                         </td>
                         <td class="is-vcentered">
                             {% if m %}
-                                <div><small><strong>Desc:</strong> {{ m.description or '-' }}</small></div>
-                                <div><small><strong>Cat:</strong> {{ m.category or '-' }}</small></div>
+                                <div class="view-mode">
+                                    <div><small><strong>Desc:</strong> {{ m.description or '-' }}</small></div>
+                                    {% if m.hint %}<div><small><strong>Hint:</strong> {{ m.hint }}</small></div>{% endif %}
+                                </div>
+                                <div class="edit-mode">
+                                    <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.25rem;"><small><strong>Desc:</strong></small> <input type="text" class="inline-edit-input" id="edit-desc-{{ i }}" value="{{ m.description or '' }}" placeholder="Description" style="flex:1; margin-bottom:0;"></div>
+                                    <div style="display:flex; align-items:center; gap:0.5rem;"><small><strong>Hint:</strong></small> <input type="text" class="inline-edit-input" id="edit-hint-{{ i }}" value="{{ m.hint or '' }}" placeholder="Hint" style="flex:1; margin-bottom:0;"></div>
+                                </div>
                             {% else %}
                                 <span class="has-text-grey-light">-</span>
                             {% endif %}
@@ -242,9 +267,19 @@
                                     <span class="icon"><i class="fas fa-play"></i></span>
                                 </button>
                                 {% if m %}
-                                <button class="button is-warning is-light" onclick='editMetadata({{ m | tojson }})' title="Edit Metadata">
-                                    <span class="icon"><i class="fas fa-tag"></i></span>
-                                </button>
+                                <div class="view-mode" style="display: inline-block;">
+                                    <button class="button is-warning is-light" onclick="startInlineEdit({{ i }})" title="Edit Description & Hint">
+                                        <span class="icon"><i class="fas fa-pencil-alt"></i></span>
+                                    </button>
+                                </div>
+                                <div class="edit-mode">
+                                    <button class="button is-success is-light" onclick="saveInlineEdit({{ i }})" title="Save">
+                                        <span class="icon"><i class="fas fa-check"></i></span>
+                                    </button>
+                                    <button class="button is-danger is-light" onclick="cancelInlineEdit({{ i }})" title="Cancel">
+                                        <span class="icon"><i class="fas fa-times"></i></span>
+                                    </button>
+                                </div>
                                 {% endif %}
                             </div>
                         </td>
@@ -549,10 +584,77 @@ async function saveMetadata() {
     fd.append('description', document.getElementById('metaDesc').value);
     fd.append('category', document.getElementById('metaCat').value);
     fd.append('hint', document.getElementById('metaHint').value);
-    
+
     const res = await fetch('/api/metadata/update', {method: 'POST', body: fd});
     if (res.ok) location.reload();
     else alert('Error saving metadata');
+}
+
+// Inline Editing Functions
+let inlineEditOriginal = {};
+
+function startInlineEdit(rowNum) {
+    const row = document.getElementById('row-' + rowNum);
+    // Store original values for cancel
+    inlineEditOriginal[rowNum] = {
+        desc: document.getElementById('edit-desc-' + rowNum).value,
+        hint: document.getElementById('edit-hint-' + rowNum).value
+    };
+    row.classList.add('is-editing');
+    document.getElementById('edit-desc-' + rowNum).focus();
+}
+
+function cancelInlineEdit(rowNum) {
+    const row = document.getElementById('row-' + rowNum);
+    // Restore original values
+    if (inlineEditOriginal[rowNum]) {
+        document.getElementById('edit-desc-' + rowNum).value = inlineEditOriginal[rowNum].desc;
+        document.getElementById('edit-hint-' + rowNum).value = inlineEditOriginal[rowNum].hint;
+    }
+    row.classList.remove('is-editing');
+    delete inlineEditOriginal[rowNum];
+}
+
+async function saveInlineEdit(rowNum) {
+    const row = document.getElementById('row-' + rowNum);
+    const audioId = row.dataset.audioId;
+    const category = row.dataset.category;
+    const desc = document.getElementById('edit-desc-' + rowNum).value;
+    const hint = document.getElementById('edit-hint-' + rowNum).value;
+
+    console.log('Saving inline edit:', {rowNum, audioId, category, desc, hint});
+
+    if (!audioId) {
+        alert('Error: No audio ID found for this row');
+        return;
+    }
+
+    const fd = new FormData();
+    fd.append('id', audioId);
+    fd.append('description', desc);
+    fd.append('category', category);
+    fd.append('hint', hint);
+
+    try {
+        const res = await fetch('/api/metadata/update', {method: 'POST', body: fd});
+        const result = await res.json();
+        console.log('Save response:', result);
+        if (res.ok && result.ok) {
+            // Update the view mode display
+            const viewMode = row.querySelector('td:nth-child(3) .view-mode');
+            let html = '<div><small><strong>Desc:</strong> ' + (desc || '-') + '</small></div>';
+            if (hint) {
+                html += '<div><small><strong>Hint:</strong> ' + hint + '</small></div>';
+            }
+            viewMode.innerHTML = html;
+            row.classList.remove('is-editing');
+            delete inlineEditOriginal[rowNum];
+        } else {
+            alert('Error saving changes');
+        }
+    } catch(e) {
+        alert('Failed to save: ' + e.message);
+    }
 }
 
 // File Management Modal Functions

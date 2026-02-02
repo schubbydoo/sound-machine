@@ -140,7 +140,7 @@ def index():
     mappings = {}
     if active_profile_id:
         rows = conn.execute("""
-            SELECT bm.button_id, af.filename, af.description, af.category, af.id as audio_id
+            SELECT bm.button_id, af.filename, af.description, af.category, af.hint, af.id as audio_id
             FROM button_mappings bm
             JOIN audio_files af ON bm.audio_file_id = af.id
             WHERE bm.profile_id = ?
