@@ -8,9 +8,12 @@ import threading
 import datetime
 from pathlib import Path
 
-APP_ROOT = Path('/home/soundconsole/sound-machine')
-WIFI_CONFIG_PATH = APP_ROOT / 'config' / 'wifi.json'
-BT_CONFIG_PATH = APP_ROOT / 'config' / 'bt.json'
+from .config import config
+
+# Path configuration - all paths come from centralized config module
+WIFI_CONFIG_PATH = config.wifi_config_path
+BT_CONFIG_PATH = config.bt_config_path
+LOG_DIR = config.log_dir
 
 def nm(cmd: str):
     try:
@@ -185,9 +188,8 @@ _bt_job_running = False
 
 def _bt_append_log(lines):
     try:
-        log_dir = APP_ROOT / 'log'
-        log_dir.mkdir(parents=True, exist_ok=True)
-        with (log_dir / 'bt_connect.log').open('a', encoding='utf-8') as f:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        with (LOG_DIR / 'bt_connect.log').open('a', encoding='utf-8') as f:
             f.write(lines)
     except: pass
 
