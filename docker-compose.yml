@@ -1,0 +1,17 @@
+services:
+  web:
+    build: .
+    image: mss-web:dev
+    container_name: mss-web
+    ports:
+      - "8080:8080"
+    environment:
+      - MSS_ROOT=/app
+      - MSS_DATA_DIR=/data
+      - MSS_SOUNDS_DIR=/sounds
+    volumes:
+      - ./cloud-data/data:/data
+      - ./cloud-data/Sounds:/sounds
+      - ./cloud-data/log:/app/log
+      - ./cloud-data/config:/app/config
+    restart: unless-stopped

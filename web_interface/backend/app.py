@@ -998,6 +998,52 @@ def bt_forget_route():
         nu.bt_save_config(cfg)
     return jsonify({'ok': True, 'output': out})
 
+@app.get('/audio/<int:button_id>')
+def serve_audio(button_id: int):
+    """Serve audio file for browser playback."""
+    conn = get_db()
+    try:
+        profile_id_str = request.args.get('profile_id')
+        profile_id = None
+
+        if profile_id_str:
+            try:
+                profile_id = int(profile_id_str)
+            except (ValueError, TypeError):
+                return jsonify({'ok': False, 'error': 'Invalid profile_id'}), 400
+
+        if not profile_id:
+            chn = get_system_config('active_channel', '1')
+            try:
+                chn = int(chn)
+            except (ValueError, TypeError):
+                chn = 1
+            row = conn.execute(
+                "SELECT profile_id FROM channels WHERE channel_number = ?", (chn,)
+            ).fetchone()
+            profile_id = row['profile_id'] if row else None
+
+        if not profile_id:
+            return jsonify({'ok': False, 'error': 'No profile found'}), 400
+
+        row = conn.execute("""
+            SELECT af.filepath, af.filename
+            FROM button_mappings bm
+            JOIN audio_files af ON bm.audio_file_id = af.id
+            WHERE bm.profile_id = ? AND bm.button_id = ?
+        """, (profile_id, button_id)).fetchone()
+
+        if not row:
+            return jsonify({'ok': False, 'error': f'No audio mapped to button {button_id}'}), 404
+
+        path = row['filepath']
+        if not path or not os.path.exists(path):
+            return jsonify({'ok': False, 'error': 'Audio file not found on disk'}), 404
+
+        return send_file(path, mimetype='audio/wav')
+    finally:
+        conn.close()
+
 @app.post('/play/<int:button_id>')
 def play(button_id: int):
     """Play audio for a button. Uses profile_id from query param or active channel."""
