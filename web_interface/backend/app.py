@@ -167,14 +167,24 @@ def index():
 
     all_files = conn.execute("SELECT * FROM audio_files ORDER BY filename").fetchall()
 
+    # Check published status for active profile
+    is_published = False
+    if active_profile_id and _column_exists(conn, 'profiles', 'published'):
+        pub_row = conn.execute(
+            "SELECT published FROM profiles WHERE id = ?", (active_profile_id,)
+        ).fetchone()
+        if pub_row:
+            is_published = bool(pub_row['published'])
+
     conn.close()
-    
-    return render_template('index.html', 
-                           profiles=profiles, 
+
+    return render_template('index.html',
+                           profiles=profiles,
                            active_profile_id=int(active_profile_id) if active_profile_id else None,
                            mappings=mappings,
                            all_files=all_files,
-                           channels=channels)
+                           channels=channels,
+                           is_published=is_published)
 
 @app.route('/api/profile/create', methods=['POST'])
 def create_profile():
@@ -606,6 +616,8 @@ def api_trackpacks():
         has_modified_at = has_profiles and _column_exists(conn, 'profiles', 'modified_at')
         has_created_at = has_profiles and _column_exists(conn, 'profiles', 'created_at')
 
+        has_published = has_profiles and _column_exists(conn, 'profiles', 'published')
+
         if has_profiles:
             # Build query with optional timestamp columns
             select_cols = "id, name, instructions"
@@ -615,8 +627,9 @@ def api_trackpacks():
                 select_cols += ", modified_at"
             if has_created_at:
                 select_cols += ", created_at"
+            where_clause = " WHERE published = 1" if has_published else ""
             rows = conn.execute(
-                f"SELECT {select_cols} FROM profiles ORDER BY name"
+                f"SELECT {select_cols} FROM profiles{where_clause} ORDER BY name"
             ).fetchall()
         else:
             rows = conn.execute(
@@ -833,6 +846,57 @@ def api_trackpack_zip(track_id):
             as_attachment=True,
             download_name=download_name
         )
+    finally:
+        conn.close()
+
+# ---------------- Publish API ----------------
+
+@app.route('/api/push/publish', methods=['POST'])
+def publish_track():
+    """Mark a track as published. Push notification is sent by the browser."""
+    data = request.json if request.is_json else request.form
+    profile_id = data.get('profile_id')
+    if not profile_id:
+        return jsonify({'ok': False, 'error': 'profile_id required'}), 400
+
+    conn = get_db()
+    try:
+        profile = conn.execute(
+            "SELECT id, name FROM profiles WHERE id = ?", (profile_id,)
+        ).fetchone()
+        if not profile:
+            return jsonify({'ok': False, 'error': 'Profile not found'}), 404
+
+        conn.execute(
+            "UPDATE profiles SET published = 1 WHERE id = ?", (profile_id,)
+        )
+        conn.commit()
+
+        return jsonify({'ok': True, 'profile_id': profile['id'], 'name': profile['name']})
+    finally:
+        conn.close()
+
+@app.route('/api/push/unpublish', methods=['POST'])
+def unpublish_track():
+    """Mark a track as unpublished (hidden from mobile app listing)."""
+    data = request.json if request.is_json else request.form
+    profile_id = data.get('profile_id')
+    if not profile_id:
+        return jsonify({'ok': False, 'error': 'profile_id required'}), 400
+
+    conn = get_db()
+    try:
+        profile = conn.execute(
+            "SELECT id, name FROM profiles WHERE id = ?", (profile_id,)
+        ).fetchone()
+        if not profile:
+            return jsonify({'ok': False, 'error': 'Profile not found'}), 404
+
+        conn.execute(
+            "UPDATE profiles SET published = 0 WHERE id = ?", (profile_id,)
+        )
+        conn.commit()
+        return jsonify({'ok': True, 'profile_id': profile['id'], 'name': profile['name']})
     finally:
         conn.close()
 

@@ -88,6 +88,22 @@
                         <span>New Track</span>
                     </button>
                 </div>
+                <div class="level-item">
+                    {% if is_published %}
+                    <span class="tag is-success is-medium">
+                        <span class="icon is-small"><i class="fas fa-check-circle"></i></span>&nbsp;Published
+                    </span>
+                    <button class="button is-light is-small ml-2" onclick="unpublishTrack()">
+                        <span class="icon is-small"><i class="fas fa-eye-slash"></i></span>
+                        <span>Unpublish</span>
+                    </button>
+                    {% else %}
+                    <button class="button is-warning" onclick="publishTrack()">
+                        <span class="icon"><i class="fas fa-bullhorn"></i></span>
+                        <span>Publish</span>
+                    </button>
+                    {% endif %}
+                </div>
             </div>
             <div class="level-right">
                 <div class="level-item">
@@ -446,6 +462,56 @@ async function deleteProfile() {
     const js = await res.json();
     if (js.ok) window.location.href = '/';
     else alert(js.error);
+}
+
+async function publishTrack() {
+    const sel = document.getElementById('profileSelect');
+    const name = sel.options[sel.selectedIndex].text.trim();
+    if (!confirm(`Publish "${name}"?\n\nThis will make it visible to all app users and send a push notification.`)) return;
+    try {
+        // 1. Mark as published in DB
+        const res = await fetch('/api/push/publish', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({profile_id: '{{ active_profile_id }}'})
+        });
+        const js = await res.json();
+        if (!js.ok) {
+            alert(js.error || 'Failed to publish');
+            return;
+        }
+        // 2. Send push notification via Cloudflare Worker (from browser to avoid 403)
+        try {
+            await fetch('https://api.memorysparkplay.fun/api/push/send-new-track', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({trackId: js.profile_id, trackName: js.name})
+            });
+        } catch(pushErr) {
+            console.warn('Push notification failed:', pushErr);
+        }
+        location.reload();
+    } catch(e) {
+        alert('Publish failed: ' + e.message);
+    }
+}
+
+async function unpublishTrack() {
+    const sel = document.getElementById('profileSelect');
+    const name = sel.options[sel.selectedIndex].text.trim();
+    if (!confirm(`Unpublish "${name}"?\n\nThis will hide it from the mobile app.`)) return;
+    try {
+        const res = await fetch('/api/push/unpublish', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({profile_id: '{{ active_profile_id }}'})
+        });
+        const js = await res.json();
+        if (js.ok) location.reload();
+        else alert(js.error || 'Failed to unpublish');
+    } catch(e) {
+        alert('Unpublish failed: ' + e.message);
+    }
 }
 
 // Profile Instructions
