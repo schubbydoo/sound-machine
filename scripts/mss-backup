@@ -1,0 +1,320 @@
+#!/usr/bin/env bash
+# =============================================================================
+# mss-backup — Local-first backup for Memory Spark Station
+#
+# Creates timestamped tar.gz snapshots of the MSS cloud-data directory.
+# Designed for pluggable targets: local (default), usb, rsync, s3.
+#
+# Safety features:
+#   - flock: prevents concurrent runs
+#   - Atomic archive: writes to .tmp then renames (no partial tarballs)
+#   - Secrets redacted from inventory and logs
+#   - Writes last_backup.json even on failure
+#
+# Usage:
+#   ./scripts/mss-backup              # run a backup
+#   ./scripts/mss-backup --dry-run    # show what would happen
+#
+# Configuration: override via environment variables.
+# =============================================================================
+set -euo pipefail
+
+# ---- Configuration (override via env vars) ----
+
+MSS_PROJECT_DIR="${MSS_PROJECT_DIR:-/home/shschubert/Projects/sound-machine}"
+MSS_CLOUD_DATA="${MSS_CLOUD_DATA:-${MSS_PROJECT_DIR}/cloud-data}"
+
+BACKUP_DIR="${MSS_BACKUP_DIR:-/home/shschubert/backups/mss}"
+ARCHIVE_DIR="${BACKUP_DIR}/archive"
+STAGING_DIR="${BACKUP_DIR}/staging"
+LOG_FILE="${BACKUP_DIR}/backup.log"
+STATUS_FILE="${BACKUP_DIR}/last_backup.json"
+LOCK_FILE="${BACKUP_DIR}/.mss-backup.lock"
+
+# Retention: keep at most this many backups
+RETENTION_COUNT="${MSS_BACKUP_RETENTION:-7}"
+
+# Pluggable target mode: local | usb | rsync | s3
+TARGET_MODE="${MSS_BACKUP_TARGET:-local}"
+
+# Target-specific settings (stubs — not active unless TARGET_MODE is changed)
+USB_TARGET_DIR="${MSS_BACKUP_USB_DIR:-/mnt/mss-backups}"
+RSYNC_TARGET="${MSS_BACKUP_RSYNC_TARGET:-user@host:/backups/mss}"
+S3_BUCKET="${MSS_BACKUP_S3_BUCKET:-s3://your-bucket/mss-backups}"
+
+# ---- Dry-run support ----
+DRY_RUN=false
+if [[ "${1:-}" == "--dry-run" ]]; then
+    DRY_RUN=true
+fi
+
+# ---- Ensure directories exist early (needed for lock file + log) ----
+mkdir -p "$ARCHIVE_DIR" "$STAGING_DIR"
+
+# ---- Exclusive lock (flock) ----
+# Open lock file on fd 9; fail immediately if another backup is running.
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+    echo "[$(date -Iseconds)] ABORT: Another mss-backup is already running (lock held)." | tee -a "$LOG_FILE"
+    exit 1
+fi
+
+# ---- Helpers ----
+
+TIMESTAMP=$(date +%Y-%m-%d_%H%M%S)
+STARTED_AT=$(date -Iseconds)
+BACKUP_FILENAME="mss-backup-${TIMESTAMP}.tar.gz"
+BACKUP_PATH="${ARCHIVE_DIR}/${BACKUP_FILENAME}"
+BACKUP_TMP="${ARCHIVE_DIR}/.mss-backup-${TIMESTAMP}.tar.gz.tmp"
+LATEST_LINK="${ARCHIVE_DIR}/mss-backup-latest.tar.gz"
+
+log() {
+    local msg="[$(date -Iseconds)] $1"
+    echo "$msg"
+    echo "$msg" >> "$LOG_FILE"
+}
+
+redact_secrets() {
+    sed -E \
+        -e 's/(--token\s+)\S+/\1<REDACTED>/g' \
+        -e 's/(token['"'"'"]*\s*[:=]\s*['"'"'"]*)\S+/\1<REDACTED>/gi' \
+        -e 's/(password['"'"'"]*\s*[:=]\s*['"'"'"]*)\S+/\1<REDACTED>/gi' \
+        -e 's/(secret['"'"'"]*\s*[:=]\s*['"'"'"]*)\S+/\1<REDACTED>/gi' \
+        -e 's/(MSS_OPS_TOKEN\s*=\s*)\S+/\1<REDACTED>/gi' \
+        -e 's/(eyJ[A-Za-z0-9_-]{20,})/<REDACTED_JWT>/g'
+}
+
+write_status() {
+    local status="$1"
+    local notes="${2:-}"
+    local size=0
+    local sha=""
+    local finished_at
+    finished_at=$(date -Iseconds)
+
+    if [[ -f "$BACKUP_PATH" ]]; then
+        size=$(stat -c%s "$BACKUP_PATH" 2>/dev/null || echo 0)
+        sha=$(sha256sum "$BACKUP_PATH" 2>/dev/null | cut -d' ' -f1 || echo "")
+    fi
+
+    cat > "$STATUS_FILE" <<ENDJSON
+{
+  "started_at": "${STARTED_AT}",
+  "finished_at": "${finished_at}",
+  "status": "${status}",
+  "backup_file": "${BACKUP_PATH}",
+  "size_bytes": ${size},
+  "sha256": "${sha}",
+  "target_mode": "${TARGET_MODE}",
+  "included_paths": [
+    "${MSS_CLOUD_DATA}/data",
+    "${MSS_CLOUD_DATA}/Sounds",
+    "${MSS_CLOUD_DATA}/config",
+    "${MSS_CLOUD_DATA}/log"
+  ],
+  "retention_count": ${RETENTION_COUNT},
+  "notes": "${notes}"
+}
+ENDJSON
+}
+
+die() {
+    log "FATAL: $1"
+    write_status "failure" "$1"
+    # Clean up partial tmp file if it exists
+    rm -f "$BACKUP_TMP"
+    exit 1
+}
+
+# Clean up tmp file on any unexpected exit
+trap 'rm -f "$BACKUP_TMP"' EXIT
+
+# ---- Pre-flight checks ----
+
+log "========== MSS Backup starting (${TARGET_MODE} mode) =========="
+
+[[ -d "$MSS_CLOUD_DATA" ]]          || die "Cloud data directory not found: ${MSS_CLOUD_DATA}"
+[[ -d "${MSS_CLOUD_DATA}/data" ]]    || die "Data directory not found: ${MSS_CLOUD_DATA}/data"
+[[ -d "${MSS_CLOUD_DATA}/Sounds" ]]  || die "Sounds directory not found: ${MSS_CLOUD_DATA}/Sounds"
+
+log "Source: ${MSS_CLOUD_DATA}"
+log "Destination: ${BACKUP_PATH}"
+
+if $DRY_RUN; then
+    log "DRY RUN — would back up:"
+    du -sh "${MSS_CLOUD_DATA}/data" "${MSS_CLOUD_DATA}/Sounds" "${MSS_CLOUD_DATA}/config" "${MSS_CLOUD_DATA}/log" 2>/dev/null | while read -r line; do
+        log "  $line"
+    done
+    log "DRY RUN complete. No files created."
+    exit 0
+fi
+
+# ---- Step 1: Create inventory file ----
+
+log "Creating inventory snapshot..."
+INVENTORY="${STAGING_DIR}/inventory.txt"
+
+{
+    echo "MSS Backup Inventory — ${TIMESTAMP}"
+    echo "=================================================="
+    echo ""
+
+    echo "--- docker ps (mss-web) ---"
+    docker ps --filter name=mss-web --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Ports}}' 2>&1 || echo "(docker not available)"
+    echo ""
+
+    echo "--- docker images (mss-web) ---"
+    docker images mss-web:dev --format 'table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}\t{{.CreatedAt}}' 2>&1 || echo "(docker not available)"
+    echo ""
+
+    echo "--- docker compose services ---"
+    (cd "$MSS_PROJECT_DIR" && docker compose config --services 2>&1) || echo "(compose not available)"
+    echo ""
+
+    echo "--- git status ---"
+    if [[ -d "${MSS_PROJECT_DIR}/.git" ]]; then
+        echo "HEAD: $(git -C "$MSS_PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo 'unknown')"
+        echo "Branch: $(git -C "$MSS_PROJECT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'unknown')"
+        if git -C "$MSS_PROJECT_DIR" diff --quiet 2>/dev/null; then
+            echo "Working tree: clean"
+        else
+            echo "Working tree: dirty"
+        fi
+    else
+        echo "(not a git repo)"
+    fi
+    echo ""
+
+    echo "--- systemctl status docker ---"
+    systemctl status docker --no-pager -l 2>&1 | head -10 || echo "(systemctl not available)"
+    echo ""
+
+    echo "--- systemctl status cloudflared ---"
+    systemctl status cloudflared --no-pager -l 2>&1 | head -10 || echo "(not installed)"
+    echo ""
+
+    echo "--- disk usage (source) ---"
+    du -sh "${MSS_CLOUD_DATA}/data" "${MSS_CLOUD_DATA}/Sounds" "${MSS_CLOUD_DATA}/config" "${MSS_CLOUD_DATA}/log" 2>/dev/null || echo "(error)"
+    echo ""
+
+    echo "--- df (backup volume) ---"
+    df -h "$ARCHIVE_DIR" 2>/dev/null || echo "(error)"
+
+} 2>&1 | redact_secrets > "$INVENTORY"
+
+log "Inventory written."
+
+# ---- Step 2: Safe SQLite backup ----
+
+log "Creating safe SQLite backup..."
+DB_SRC="${MSS_CLOUD_DATA}/data/sound_machine.db"
+DB_BACKUP="${STAGING_DIR}/sound_machine.db"
+
+if [[ -f "$DB_SRC" ]]; then
+    if command -v sqlite3 &>/dev/null; then
+        if sqlite3 "$DB_SRC" ".backup '${DB_BACKUP}'" 2>/dev/null; then
+            log "SQLite .backup completed (consistent snapshot)."
+        else
+            cp "$DB_SRC" "$DB_BACKUP"
+            log "WARNING: sqlite3 .backup failed; fell back to file copy."
+        fi
+    else
+        cp "$DB_SRC" "$DB_BACKUP"
+        log "WARNING: sqlite3 not found; used file copy."
+    fi
+else
+    log "WARNING: Database not found at ${DB_SRC}; skipping."
+fi
+
+# ---- Step 3: Create tarball (atomic: write to .tmp, then rename) ----
+
+log "Creating archive..."
+
+# Build list of staging extras to include
+STAGING_EXTRAS=( inventory.txt )
+[[ -f "$DB_BACKUP" ]] && STAGING_EXTRAS+=( sound_machine.db )
+
+tar -czf "$BACKUP_TMP" \
+    -C "${MSS_CLOUD_DATA}" \
+    --exclude='*.tmp' \
+    data/ \
+    Sounds/ \
+    config/ \
+    log/ \
+    -C "${STAGING_DIR}" \
+    "${STAGING_EXTRAS[@]}"
+
+# Atomic rename — if we get here, the archive is complete
+mv "$BACKUP_TMP" "$BACKUP_PATH"
+
+log "Archive created: $(du -h "$BACKUP_PATH" | cut -f1)"
+
+# ---- Step 4: Update latest symlink ----
+
+ln -sf "$BACKUP_FILENAME" "$LATEST_LINK"
+log "Latest symlink updated."
+
+# ---- Step 5: Pluggable target dispatch ----
+
+case "$TARGET_MODE" in
+    local)
+        log "Target: local — backup stays in ${ARCHIVE_DIR}"
+        ;;
+    usb)
+        if [[ -d "$USB_TARGET_DIR" ]]; then
+            # Uncomment to enable:
+            # cp "$BACKUP_PATH" "${USB_TARGET_DIR}/"
+            # log "Copied to USB: ${USB_TARGET_DIR}/${BACKUP_FILENAME}"
+            log "USB target configured but copy is commented out. Enable in script when ready."
+        else
+            log "WARNING: USB target dir ${USB_TARGET_DIR} not mounted. Backup is local only."
+        fi
+        ;;
+    rsync)
+        # Uncomment to enable:
+        # rsync -avz "$BACKUP_PATH" "${RSYNC_TARGET}/"
+        # log "Synced to remote: ${RSYNC_TARGET}/${BACKUP_FILENAME}"
+        log "rsync target not yet implemented. Backup is local only."
+        ;;
+    s3)
+        # Uncomment to enable:
+        # if command -v aws &>/dev/null; then
+        #     aws s3 cp "$BACKUP_PATH" "${S3_BUCKET}/${BACKUP_FILENAME}"
+        #     log "Uploaded to S3: ${S3_BUCKET}/${BACKUP_FILENAME}"
+        # else
+        #     log "WARNING: aws cli not installed. Backup is local only."
+        # fi
+        log "S3 target not yet implemented. Backup is local only."
+        ;;
+    *)
+        log "WARNING: Unknown TARGET_MODE '${TARGET_MODE}'. Backup is local only."
+        ;;
+esac
+
+# ---- Step 6: Rotation ----
+
+log "Applying retention (keep last ${RETENTION_COUNT})..."
+
+BACKUPS_TO_DELETE=$(ls -1t "${ARCHIVE_DIR}"/mss-backup-2*.tar.gz 2>/dev/null \
+    | tail -n +$(( RETENTION_COUNT + 1 )) || true)
+
+if [[ -n "$BACKUPS_TO_DELETE" ]]; then
+    while IFS= read -r old; do
+        rm -f "$old"
+        log "Rotated out: $(basename "$old")"
+    done <<< "$BACKUPS_TO_DELETE"
+else
+    CURRENT=$(ls -1 "${ARCHIVE_DIR}"/mss-backup-2*.tar.gz 2>/dev/null | wc -l || echo 0)
+    log "No old backups to rotate (${CURRENT} on disk, limit ${RETENTION_COUNT})."
+fi
+
+# ---- Step 7: Cleanup staging ----
+
+rm -f "${STAGING_DIR}/inventory.txt" "${STAGING_DIR}/sound_machine.db"
+log "Staging cleaned."
+
+# ---- Step 8: Write success status ----
+
+write_status "success" "local-first backup completed"
+log "Status written to ${STATUS_FILE}"
+log "========== MSS Backup finished successfully =========="

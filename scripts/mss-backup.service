@@ -1,0 +1,17 @@
+[Unit]
+Description=MSS Backup — snapshot cloud-data to local archive
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/shschubert/Projects/sound-machine/scripts/mss-backup
+User=shschubert
+Group=shschubert
+StandardOutput=journal
+StandardError=journal
+
+# Fail clearly on non-zero exit (default: only 0 is success)
+SuccessExitStatus=
+# Safety: kill a hung backup after 10 minutes
+TimeoutStartSec=600

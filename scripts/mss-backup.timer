@@ -1,0 +1,10 @@
+[Unit]
+Description=Run MSS Backup daily at 3:15 AM
+
+[Timer]
+OnCalendar=*-*-* 03:15:00
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target
