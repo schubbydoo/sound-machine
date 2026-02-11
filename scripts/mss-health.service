@@ -1,0 +1,9 @@
+[Unit]
+Description=MSS Health Check
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/home/shschubert/Projects/sound-machine/scripts/healthcheck.sh
+StandardOutput=journal
+StandardError=journal

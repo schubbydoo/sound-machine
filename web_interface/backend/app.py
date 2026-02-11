@@ -25,6 +25,7 @@ from . import network_utils as nu
 from .storage import get_storage_adapter, get_trackpack_updated_at as storage_get_updated_at
 from .server_identity import get_server_id, get_server_name
 from .config import config
+from .ops import ops_bp
 
 # Path configuration - all paths come from centralized config module
 DB_PATH = config.db_path
@@ -34,6 +35,7 @@ DATA_DIR = config.data_dir
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500 MB limit
+app.register_blueprint(ops_bp)
 
 # Startup validation: log paths, create directories, validate configuration
 # fail_fast=False allows the app to start even if some checks fail (e.g., DB not yet created)

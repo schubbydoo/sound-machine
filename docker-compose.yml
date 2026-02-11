@@ -9,9 +9,17 @@ services:
       - MSS_ROOT=/app
       - MSS_DATA_DIR=/data
       - MSS_SOUNDS_DIR=/sounds
+      # Ops dashboard — set these to enable remote diagnostics
+      - MSS_OPS_ENABLED=${MSS_OPS_ENABLED:-0}
+      - MSS_OPS_TOKEN=${MSS_OPS_TOKEN:-}
     volumes:
       - ./cloud-data/data:/data
       - ./cloud-data/Sounds:/sounds
       - ./cloud-data/log:/app/log
       - ./cloud-data/config:/app/config
+      # Ops: read-only host mounts for diagnostics
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /etc/cloudflared:/host_etc_cloudflared:ro
+      - /etc/systemd/system:/host_etc_systemd:ro
+      - ./docker-compose.yml:/host_config/docker-compose.yml:ro
     restart: unless-stopped

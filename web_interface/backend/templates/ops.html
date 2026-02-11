@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MSS Ops Dashboard</title>
+<style>
+  :root { --bg: #0d1117; --card: #161b22; --border: #30363d; --text: #c9d1d9;
+          --green: #3fb950; --yellow: #d29922; --red: #f85149; --blue: #58a6ff; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+         background: var(--bg); color: var(--text); padding: 1rem; line-height: 1.5; }
+  h1 { font-size: 1.4rem; margin-bottom: .5rem; }
+  h2 { font-size: 1.1rem; margin-bottom: .5rem; color: var(--blue); }
+  .header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
+  .header h1 { flex: 1; }
+  .badge { display: inline-block; padding: .25rem .75rem; border-radius: 1rem; font-weight: 600;
+           font-size: .85rem; }
+  .badge-ok { background: var(--green); color: #000; }
+  .badge-warn { background: var(--yellow); color: #000; }
+  .badge-err { background: var(--red); color: #fff; }
+  .badge-off { background: var(--border); color: var(--text); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+  .grid-bottom { grid-template-columns: 1fr 1fr; align-items: start; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: .5rem; padding: 1rem; }
+  .kv { display: grid; grid-template-columns: 140px 1fr; gap: .25rem .5rem; font-size: .85rem; }
+  .kv dt { color: #8b949e; }
+  .kv dd { word-break: break-all; }
+  pre.log { background: #010409; border: 1px solid var(--border); border-radius: .375rem;
+            padding: .75rem; font-size: .75rem; max-height: 400px; overflow: auto;
+            white-space: pre-wrap; word-break: break-all; }
+  .actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+  button { padding: .4rem 1rem; border-radius: .375rem; border: 1px solid var(--border);
+           background: var(--card); color: var(--text); cursor: pointer; font-size: .85rem; }
+  button:hover { background: var(--border); }
+  button.primary { background: var(--blue); color: #000; border-color: var(--blue); }
+  .timestamp { font-size: .75rem; color: #8b949e; }
+  .disabled-msg { text-align: center; padding: 4rem 1rem; }
+  .disabled-msg h2 { color: var(--yellow); font-size: 1.3rem; margin-bottom: .5rem; }
+  .spinner { display: inline-block; width: 1rem; height: 1rem; border: 2px solid var(--border);
+             border-top-color: var(--blue); border-radius: 50%; animation: spin .6s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+{% if not ops_enabled %}
+<div class="disabled-msg">
+  <h2>Ops Dashboard Disabled</h2>
+  <p>Set <code>MSS_OPS_ENABLED=1</code> in the environment to activate.</p>
+  <p style="margin-top:.5rem;color:#8b949e;">This keeps the ops dashboard locked down until you need it.</p>
+</div>
+{% else %}
+
+<div class="header">
+  <h1>MSS Ops Dashboard</h1>
+  <span id="overall-badge" class="badge badge-off">Loading...</span>
+</div>
+
+<div class="actions">
+  <button onclick="refreshAll()">Refresh All</button>
+  <button onclick="downloadSnapshot()">Download Snapshot</button>
+  <button onclick="viewLogs('web')">View Web Logs</button>
+  <button onclick="viewLogs('cloudflared')">View Cloudflared Logs</button>
+</div>
+
+<div class="grid">
+  <!-- MSS App -->
+  <div class="card">
+    <h2>MSS Application</h2>
+    <dl id="health-data" class="kv">
+      <dt>Status</dt><dd><span class="spinner"></span></dd>
+    </dl>
+  </div>
+
+  <!-- Docker -->
+  <div class="card">
+    <h2>Docker</h2>
+    <dl id="docker-data" class="kv">
+      <dt>Status</dt><dd><span class="spinner"></span></dd>
+    </dl>
+  </div>
+
+  <!-- Cloudflare Tunnel -->
+  <div class="card">
+    <h2>Cloudflare Tunnel</h2>
+    <dl id="cf-data" class="kv">
+      <dt>Status</dt><dd><span class="spinner"></span></dd>
+    </dl>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:1rem;">
+  <h2>Disk &amp; Memory</h2>
+  <pre id="disk-data" class="log" style="max-height:200px;">Loading...</pre>
+</div>
+
+<div class="grid grid-bottom">
+  <!-- Logs -->
+  <div class="card">
+    <h2>Logs</h2>
+    <pre id="log-output" class="log">Click "View Web Logs" or "View Cloudflared Logs" to load.</pre>
+  </div>
+
+  <!-- Trackpacks -->
+  <div class="card">
+    <h2>Trackpacks</h2>
+    <dl id="tp-data" class="kv">
+      <dt>Status</dt><dd><span class="spinner"></span></dd>
+    </dl>
+  </div>
+</div>
+
+<p class="timestamp" id="last-updated"></p>
+
+<script>
+const $ = s => document.querySelector(s);
+
+const OPS_TOKEN = '{{ ops_token }}';
+
+async function api(path) {
+  try {
+    const r = await fetch(path, { headers: { 'X-MSS-Ops-Token': OPS_TOKEN } });
+    if (!r.ok) {
+      const body = await r.text();
+      throw new Error(`${r.status}: ${body}`);
+    }
+    return await r.json();
+  } catch (e) {
+    console.error(path, e);
+    return { ok: false, error: e.message };
+  }
+}
+
+function kv(pairs) {
+  return pairs.map(([k,v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+}
+
+function badge(ok, label) {
+  const cls = ok === true ? 'badge-ok' : ok === false ? 'badge-err' : 'badge-warn';
+  return `<span class="badge ${cls}">${label}</span>`;
+}
+
+async function refreshAll() {
+  const [health, status] = await Promise.all([api('/ops/api/health'), api('/ops/api/status')]);
+  let allGood = true;
+
+  // Health
+  if (health && health.ok) {
+    const a = health.app;
+    const d = health.database;
+    $('#health-data').innerHTML = kv([
+      ['App', badge(true, 'UP')],
+      ['Version', a.version],
+      ['Server ID', a.server_id],
+      ['Server Name', a.server_name],
+      ['Python', health.system.python],
+      ['Uptime', health.system.uptime],
+      ['DB Path', health.paths.db_path],
+      ['DB Exists', d.exists ? badge(true,'Yes') : badge(false,'No')],
+    ]);
+    if (!d.exists) allGood = false;
+  } else {
+    $('#health-data').innerHTML = kv([['Error', badge(false, health?.error || 'Failed')]]);
+    allGood = false;
+  }
+
+  // Docker + CF + Disk
+  if (status && status.ok) {
+    const d = status.docker;
+    const mss = d.mss_web || {};
+    const dUp = mss.state === 'running';
+    if (!dUp) allGood = false;
+    $('#docker-data').innerHTML = kv([
+      ['Socket', d.available ? badge(true,'Connected') : badge(false,'Unavailable')],
+      ['Container', badge(dUp, mss.state || 'unknown')],
+      ['Status', mss.status || 'n/a'],
+      ['Image', mss.image || 'n/a'],
+      ['Port 8080', status.ports.web?.ok ? badge(true,'OK') : badge(false, status.ports.web?.http_status || '?')],
+    ]);
+
+    const cf = status.cloudflared;
+    $('#cf-data').innerHTML = kv([
+      ['Config Found', cf.config_found ? badge(true,'Yes') : badge(null,'No')],
+      ['Preview', cf.config_preview ? `<pre style="font-size:.7rem;margin:0;">${cf.config_preview}</pre>` : 'n/a'],
+    ]);
+
+    $('#disk-data').textContent = (status.disk || '') + '\n\n' + (status.memory || '');
+  } else {
+    $('#docker-data').innerHTML = kv([['Error', badge(false, status?.error || 'Failed')]]);
+    allGood = false;
+  }
+
+  // Trackpacks (from health data)
+  if (health && health.ok) {
+    const d = health.database;
+    const rtp = (d.recent_trackpacks || []);
+    const tpList = rtp.map(t => `${t.published ? '&#9679;' : '&#9675;'} ${t.name}`).join('<br>');
+    $('#tp-data').innerHTML = kv([
+      ['Total', d.trackpack_count ?? '?'],
+      ['Audio Files', d.audio_file_count ?? '?'],
+      ['DB Size', d.size_bytes ? (d.size_bytes/1024).toFixed(1)+'KB' : '?'],
+    ]) + '<div style="margin-top:.5rem;font-size:.85rem;"><strong>&#9679; published &nbsp; &#9675; draft</strong><br>' + (tpList || 'none') + '</div>';
+  }
+
+  // Overall badge
+  $('#overall-badge').className = 'badge ' + (allGood ? 'badge-ok' : 'badge-err');
+  $('#overall-badge').textContent = allGood ? 'All Systems OK' : 'Issues Detected';
+  $('#last-updated').textContent = 'Last updated: ' + new Date().toLocaleString();
+}
+
+async function viewLogs(source) {
+  $('#log-output').textContent = 'Loading ' + source + ' logs...';
+  const data = await api('/ops/api/logs?source=' + source + '&lines=300');
+  if (data && data.ok) {
+    $('#log-output').textContent = data.log || '(empty)';
+  } else {
+    $('#log-output').textContent = 'Error: ' + (data?.error || 'request failed');
+  }
+}
+
+async function downloadSnapshot() {
+  try {
+    const r = await fetch('/ops/api/snapshot', { headers: { 'X-MSS-Ops-Token': OPS_TOKEN } });
+    if (!r.ok) {
+      alert('Snapshot failed: ' + r.status);
+      return;
+    }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = r.headers.get('Content-Disposition')?.split('filename=')[1] || 'mss-snapshot.tar.gz';
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert('Snapshot error: ' + e.message);
+  }
+}
+
+// Auto-load on page open
+refreshAll();
+</script>
+
+{% endif %}
+</body>
+</html>
