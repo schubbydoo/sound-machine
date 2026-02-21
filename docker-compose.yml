@@ -12,11 +12,15 @@ services:
       # Ops dashboard — set these to enable remote diagnostics
       - MSS_OPS_ENABLED=${MSS_OPS_ENABLED:-0}
       - MSS_OPS_TOKEN=${MSS_OPS_TOKEN:-}
+      # App download page
+      - MSS_DOWNLOADS_DIR=/downloads
     volumes:
       - ./cloud-data/data:/data
       - ./cloud-data/Sounds:/sounds
       - ./cloud-data/log:/app/log
       - ./cloud-data/config:/app/config
+      # App download: read-only APK hosting
+      - ./cloud-data/downloads:/downloads:ro
       # Ops: read-only host mounts for diagnostics
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /etc/cloudflared:/host_etc_cloudflared:ro
