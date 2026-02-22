@@ -1,0 +1,6 @@
+{
+  "version_name": "1.1.0",
+  "version_code": 3,
+  "release_notes": "Added push notifications.",
+  "min_android": "7.0"
+}

@@ -35,3 +35,6 @@ Sounds/**
 *.pid
 .claude/
 data/
+
+# Downloads (APK binaries; version.json is tracked)
+cloud-data/downloads/*.apk
