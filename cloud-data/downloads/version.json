@@ -1,6 +1,6 @@
 {
-  "version_name": "1.1.0",
-  "version_code": 3,
-  "release_notes": "Added push notifications.",
+  "version_name": "1.1.1",
+  "version_code": 4,
+  "release_notes": "Fixed Android push notifications.",
   "min_android": "7.0"
 }

@@ -1,0 +1,15 @@
+name = "mss-push-worker"
+main = "src/index.js"
+compatibility_date = "2024-12-01"
+
+# Route only /api/push/* on the existing domain.
+# The Cloudflare tunnel continues to handle all other routes.
+routes = [
+  { pattern = "api.memorysparkplay.fun/api/push/*", zone_name = "memorysparkplay.fun" }
+]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "mss-push"
+database_id = "8a70b4c8-3d13-49f3-b5a3-51197573ad6a"
+migrations_dir = "migrations"
