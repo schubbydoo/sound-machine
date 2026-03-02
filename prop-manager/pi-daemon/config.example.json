@@ -1,0 +1,6 @@
+{
+  "prop_name": "Sound Console",
+  "webui_port": 8080,
+  "access_code": "changeme",
+  "ble_advertise_window_minutes": 10
+}

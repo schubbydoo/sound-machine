@@ -1,0 +1,17 @@
+[Unit]
+Description=Prop Manager BLE Daemon
+Documentation=https://github.com/your-org/prop-manager
+After=bluetooth.target network.target NetworkManager.service
+Wants=bluetooth.target NetworkManager.service
+
+[Service]
+Type=simple
+ExecStart=/opt/propmanager/venv/bin/python /opt/propmanager/daemon.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=propmanager
+
+[Install]
+WantedBy=multi-user.target

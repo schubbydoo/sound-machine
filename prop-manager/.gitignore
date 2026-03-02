@@ -1,0 +1,13 @@
+# App
+app/node_modules/
+app/.expo/
+app/android/
+app/ios/
+app/*.apk
+app/*.aab
+app/dist/
+app/web-build/
+app/expo-env.d.ts
+
+# Pi — never commit live config (contains access_code)
+pi-daemon/config.json
