@@ -8,6 +8,7 @@ existing ones (e.g. home network, shop network).
 
 import logging
 import re
+import socket
 import subprocess
 import time
 from typing import Optional
@@ -190,3 +191,50 @@ def enable_ap_mode() -> bool:
 
     logger.info("AP mode active — IP: 192.168.4.1")
     return True
+
+
+def discover_webui_port(fallback: int = 8080, timeout: float = 0.5) -> int:
+    """
+    Discover the WebUI port by finding listening TCP ports on localhost
+    that respond to an HTTP request.
+
+    Checks ports reported by 'ss' first, prioritising common WebUI ports.
+    Falls back to the configured port if nothing responds.
+    """
+    # Ports that are never the WebUI
+    EXCLUDE = {22, 53, 68, 123, 631, 3306, 5432, 6379}
+
+    # Parse listening TCP ports via ss
+    rc, out, _ = _run(["ss", "-tlnp"])
+    candidates: list[int] = []
+    for line in out.splitlines():
+        parts = line.split()
+        if not parts or parts[0] != "LISTEN":
+            continue
+        addr = parts[3] if len(parts) > 3 else ""
+        port_str = addr.rsplit(":", 1)[-1]
+        try:
+            port = int(port_str)
+            if port not in EXCLUDE and 1 <= port <= 65535:
+                candidates.append(port)
+        except ValueError:
+            pass
+
+    # Prefer common WebUI ports, then anything else >= 1024
+    preferred = [80, 8080, 8000, 3000, 5000, 5001, 4000, 4200, 9000]
+    ordered = [p for p in preferred if p in candidates] + \
+              [p for p in candidates if p not in preferred and p >= 1024]
+
+    for port in ordered:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=timeout) as s:
+                s.sendall(b"HEAD / HTTP/1.0\r\nHost: localhost\r\n\r\n")
+                response = s.recv(16)
+                if response.startswith(b"HTTP"):
+                    logger.info("Discovered WebUI on port %d", port)
+                    return port
+        except OSError:
+            continue
+
+    logger.info("WebUI discovery found nothing; using fallback port %d", fallback)
+    return fallback

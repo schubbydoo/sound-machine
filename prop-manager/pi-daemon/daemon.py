@@ -55,6 +55,11 @@ class PropManagerDaemon:
         self.boot_time = datetime.now()
         self.window_minutes: int = self.config.get("ble_advertise_window_minutes", 10)
         self._status: dict = {}
+        # Discover the actual WebUI port at boot; fall back to config value
+        self.webui_port: int = wifi.discover_webui_port(
+            fallback=self.config.get("webui_port", 8080)
+        )
+        logger.info("WebUI port: %d", self.webui_port)
         self._update_initial_status()
 
     # ── State ───────────────────────────────────────────────────────────────
@@ -94,7 +99,7 @@ class PropManagerDaemon:
     def _prop_info_bytes(self) -> bytearray:
         return bytearray(
             json.dumps(
-                {"name": self.config["prop_name"], "port": self.config["webui_port"]}
+                {"name": self.config["prop_name"], "port": self.webui_port}
             ).encode()
         )
 
