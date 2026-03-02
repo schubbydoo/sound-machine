@@ -96,6 +96,21 @@ class PropManagerDaemon:
     def _status_bytes(self) -> bytearray:
         return bytearray(json.dumps(self._status).encode())
 
+    def _refresh_webui_port(self) -> None:
+        """Verify the cached port still responds; rediscover if not."""
+        import socket
+        try:
+            with socket.create_connection(("127.0.0.1", self.webui_port), timeout=0.5) as s:
+                s.sendall(b"HEAD / HTTP/1.0\r\nHost: localhost\r\n\r\n")
+                if s.recv(4).startswith(b"HTTP"):
+                    return  # still valid
+        except OSError:
+            pass
+        new_port = wifi.discover_webui_port(fallback=self.config.get("webui_port", 8080))
+        if new_port != self.webui_port:
+            logger.info("WebUI port updated: %d → %d", self.webui_port, new_port)
+            self.webui_port = new_port
+
     def _prop_info_bytes(self) -> bytearray:
         return bytearray(
             json.dumps(
@@ -120,6 +135,7 @@ class PropManagerDaemon:
     ) -> bytearray:
         uid = str(characteristic.uuid).lower()
         if uid == CHAR_PROP_INFO:
+            self._refresh_webui_port()
             return self._prop_info_bytes()
         if uid == CHAR_STATUS:
             return self._status_bytes()

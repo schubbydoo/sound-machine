@@ -25,8 +25,6 @@ function encode(text: string): string {
   return Buffer.from(text, 'utf-8').toString('base64');
 }
 
-// Android 12+ requires BLUETOOTH_SCAN + BLUETOOTH_CONNECT at runtime.
-// All Android versions require ACCESS_FINE_LOCATION for BLE scanning.
 async function requestAndroidPermissions(): Promise<boolean> {
   if (Platform.OS !== 'android') return true;
 
@@ -49,10 +47,7 @@ async function requestAndroidPermissions(): Promise<boolean> {
   const allGranted = Object.values(results).every(
     (r) => r === PermissionsAndroid.RESULTS.GRANTED,
   );
-
-  if (!allGranted) {
-    console.warn('BLE permissions denied:', results);
-  }
+  if (!allGranted) console.warn('BLE permissions denied:', results);
   return allGranted;
 }
 
@@ -63,9 +58,48 @@ export function useBLE() {
     setPropInfo,
     setPropStatus,
     setPropConnecting,
+    clearProps,
   } = usePropStore();
 
-  // ── Scanning ────────────────────────────────────────────────────────────
+  // ── Auto-read Prop Info + Status on discovery (no auth required) ─────────
+  // This keeps the port and status fresh without a full provision cycle.
+
+  const readPropState = useCallback(async (device: Device) => {
+    try {
+      const connected = await manager.connectToDevice(device.id);
+      await connected.discoverAllServicesAndCharacteristics();
+
+      const infoChar = await connected.readCharacteristicForService(
+        SERVICE_UUID, CHAR_PROP_INFO,
+      );
+      const infoStr = decode(infoChar.value);
+      if (infoStr) setPropInfo(device.id, JSON.parse(infoStr) as PropInfo);
+
+      const statusChar = await connected.readCharacteristicForService(
+        SERVICE_UUID, CHAR_STATUS,
+      );
+      const statusStr = decode(statusChar.value);
+      if (statusStr) setPropStatus(device.id, JSON.parse(statusStr) as StatusPayload);
+
+      // Subscribe to ongoing status notifications
+      connected.monitorCharacteristicForService(
+        SERVICE_UUID,
+        CHAR_STATUS,
+        (err, char) => {
+          if (err) return;
+          const s = decode(char?.value ?? null);
+          if (s) {
+            try { setPropStatus(device.id, JSON.parse(s) as StatusPayload); }
+            catch { /* ignore */ }
+          }
+        },
+      );
+    } catch (err) {
+      console.warn('readPropState failed for', device.id, err);
+    }
+  }, [setPropInfo, setPropStatus]);
+
+  // ── Scanning ─────────────────────────────────────────────────────────────
 
   const startScan = useCallback(async () => {
     if (scanningRef.current) return;
@@ -93,18 +127,26 @@ export function useBLE() {
           return;
         }
         if (device) {
+          const isNew = !usePropStore.getState().props[device.id];
           upsertProp(device.id, device);
+          if (isNew) readPropState(device);
         }
       },
     );
-  }, [upsertProp]);
+  }, [upsertProp, readPropState]);
 
   const stopScan = useCallback(() => {
     manager.stopDeviceScan();
     scanningRef.current = false;
   }, []);
 
-  // ── Connect + provision ─────────────────────────────────────────────────
+  const refresh = useCallback(async () => {
+    stopScan();
+    clearProps();
+    await startScan();
+  }, [stopScan, clearProps, startScan]);
+
+  // ── Connect + provision ───────────────────────────────────────────────────
 
   const connectAndProvision = useCallback(
     async (deviceId: string, accessCode: string, ssid: string, password: string) => {
@@ -113,54 +155,40 @@ export function useBLE() {
         const device = await manager.connectToDevice(deviceId);
         await device.discoverAllServicesAndCharacteristics();
 
-        // 1. Read Prop Info (no auth required)
+        // Refresh Prop Info (gets latest port)
         const infoChar = await device.readCharacteristicForService(
-          SERVICE_UUID,
-          CHAR_PROP_INFO,
+          SERVICE_UUID, CHAR_PROP_INFO,
         );
         const infoStr = decode(infoChar.value);
-        if (infoStr) {
-          setPropInfo(deviceId, JSON.parse(infoStr) as PropInfo);
-        }
+        if (infoStr) setPropInfo(deviceId, JSON.parse(infoStr) as PropInfo);
 
-        // 2. Subscribe to Status notifications before writing anything
+        // Subscribe to Status notifications
         device.monitorCharacteristicForService(
           SERVICE_UUID,
           CHAR_STATUS,
           (err, char) => {
-            if (err) {
-              console.error('Status notify error:', err);
-              return;
-            }
-            const statusStr = decode(char?.value ?? null);
-            if (statusStr) {
-              try {
-                setPropStatus(deviceId, JSON.parse(statusStr) as StatusPayload);
-              } catch {
-                console.error('Failed to parse status:', statusStr);
-              }
+            if (err) return;
+            const s = decode(char?.value ?? null);
+            if (s) {
+              try { setPropStatus(deviceId, JSON.parse(s) as StatusPayload); }
+              catch { /* ignore */ }
             }
           },
         );
 
-        // 3. Read initial status
+        // Read initial status
         const statusChar = await device.readCharacteristicForService(
-          SERVICE_UUID,
-          CHAR_STATUS,
+          SERVICE_UUID, CHAR_STATUS,
         );
         const statusStr = decode(statusChar.value);
-        if (statusStr) {
-          setPropStatus(deviceId, JSON.parse(statusStr) as StatusPayload);
-        }
+        if (statusStr) setPropStatus(deviceId, JSON.parse(statusStr) as StatusPayload);
 
-        // 4. Authenticate
+        // Authenticate
         await device.writeCharacteristicWithResponseForService(
-          SERVICE_UUID,
-          CHAR_AUTH,
+          SERVICE_UUID, CHAR_AUTH,
           encode(JSON.stringify({ access_code: accessCode })),
         );
 
-        // Wait for auth_ok status notification
         await new Promise((r) => setTimeout(r, 1200));
 
         const currentStatus = usePropStore.getState().props[deviceId]?.status;
@@ -169,17 +197,13 @@ export function useBLE() {
           return;
         }
 
-        // 5. Write WiFi credentials
         await device.writeCharacteristicWithResponseForService(
-          SERVICE_UUID,
-          CHAR_WIFI_CREDS,
+          SERVICE_UUID, CHAR_WIFI_CREDS,
           encode(JSON.stringify({ ssid, password })),
         );
 
-        // 6. Send connect_wifi command
         await device.writeCharacteristicWithResponseForService(
-          SERVICE_UUID,
-          CHAR_COMMAND,
+          SERVICE_UUID, CHAR_COMMAND,
           encode('connect_wifi'),
         );
       } catch (err) {
@@ -198,9 +222,7 @@ export function useBLE() {
         const device = await manager.connectToDevice(deviceId);
         await device.discoverAllServicesAndCharacteristics();
         await device.writeCharacteristicWithResponseForService(
-          SERVICE_UUID,
-          CHAR_COMMAND,
-          encode(command),
+          SERVICE_UUID, CHAR_COMMAND, encode(command),
         );
       } catch (err) {
         console.error('Command error:', err);
@@ -223,5 +245,5 @@ export function useBLE() {
     };
   }, [startScan, stopScan]);
 
-  return { startScan, stopScan, connectAndProvision, sendCommand };
+  return { startScan, stopScan, refresh, connectAndProvision, sendCommand };
 }

@@ -1,12 +1,14 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
   FlatList,
+  ScrollView,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
   SafeAreaView,
+  RefreshControl,
 } from 'react-native';
 import { Link } from 'expo-router';
 import { usePropStore } from '../store/propStore';
@@ -16,7 +18,8 @@ import { WifiSelector } from '../components/WifiSelector';
 
 export default function MainScreen() {
   const { props, accessCode, selectedSsid, selectedPassword } = usePropStore();
-  const { connectAndProvision, sendCommand } = useBLE();
+  const { connectAndProvision, sendCommand, refresh } = useBLE();
+  const [refreshing, setRefreshing] = useState(false);
 
   const propList = Object.entries(props);
   const hasIdleProps = propList.some(
@@ -64,6 +67,12 @@ export default function MainScreen() {
     [sendCommand]
   );
 
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await refresh();
+    setRefreshing(false);
+  }, [refresh]);
+
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.container}>
@@ -96,10 +105,19 @@ export default function MainScreen() {
 
         {/* Prop list */}
         {propList.length === 0 ? (
-          <View style={styles.scanning}>
+          <ScrollView
+            contentContainerStyle={styles.scanning}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                tintColor="#4299e1"
+              />
+            }
+          >
             <ActivityIndicator size="large" color="#4299e1" />
             <Text style={styles.scanningText}>Scanning for props…</Text>
-          </View>
+          </ScrollView>
         ) : (
           <FlatList
             data={propList}
@@ -112,6 +130,13 @@ export default function MainScreen() {
               />
             )}
             contentContainerStyle={styles.list}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                tintColor="#4299e1"
+              />
+            }
           />
         )}
       </View>

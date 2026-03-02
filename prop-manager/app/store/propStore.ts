@@ -21,6 +21,7 @@ interface PropStore {
   setPropStatus: (deviceId: string, status: StatusPayload) => void;
   setPropConnecting: (deviceId: string, connecting: boolean) => void;
   removeProp: (deviceId: string) => void;
+  clearProps: () => void;
   setAccessCode: (code: string) => void;
   setWifiCredentials: (ssid: string, password: string) => void;
 }
@@ -74,6 +75,8 @@ export const usePropStore = create<PropStore>((set) => ({
       delete next[deviceId];
       return { props: next };
     }),
+
+  clearProps: () => set({ props: {} }),
 
   setAccessCode: (code) => set({ accessCode: code }),
 
