@@ -27,6 +27,7 @@ from .server_identity import get_server_id, get_server_name
 from .config import config
 from .ops import ops_bp
 from .app_download import app_download_bp
+from .admin import admin_bp
 
 # Path configuration - all paths come from centralized config module
 DB_PATH = config.db_path
@@ -38,6 +39,7 @@ app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500 MB limit
 app.register_blueprint(ops_bp)
 app.register_blueprint(app_download_bp)
+app.register_blueprint(admin_bp)
 
 # Startup validation: log paths, create directories, validate configuration
 # fail_fast=False allows the app to start even if some checks fail (e.g., DB not yet created)

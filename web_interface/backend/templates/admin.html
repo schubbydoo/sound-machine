@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MSS App Admin</title>
+<style>
+  :root { --bg: #0d1117; --card: #161b22; --border: #30363d; --text: #c9d1d9;
+          --green: #3fb950; --yellow: #d29922; --red: #f85149; --blue: #58a6ff;
+          --muted: #8b949e; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+         background: var(--bg); color: var(--text); padding: 1.5rem; line-height: 1.5; max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1rem; margin-bottom: .75rem; color: var(--blue); }
+  .header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+  .header h1 { flex: 1; }
+  .badge { display: inline-block; padding: .2rem .65rem; border-radius: 1rem; font-weight: 600; font-size: .8rem; }
+  .badge-ok  { background: var(--green); color: #000; }
+  .badge-off { background: var(--border); color: var(--text); }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: .5rem;
+          padding: 1.25rem; margin-bottom: 1rem; }
+  .kv { display: grid; grid-template-columns: 130px 1fr; gap: .25rem .5rem; font-size: .875rem; }
+  .kv dt { color: var(--muted); }
+  label { display: block; font-size: .85rem; color: var(--muted); margin-bottom: .3rem; margin-top: .75rem; }
+  label:first-child { margin-top: 0; }
+  input[type=text], input[type=number], textarea {
+    width: 100%; padding: .45rem .6rem; background: var(--bg); border: 1px solid var(--border);
+    border-radius: .35rem; color: var(--text); font-size: .875rem; font-family: inherit; }
+  input:focus, textarea:focus { outline: none; border-color: var(--blue); }
+  textarea { resize: vertical; min-height: 60px; }
+  .row { display: flex; gap: .75rem; align-items: flex-end; flex-wrap: wrap; }
+  .row > div { flex: 1; min-width: 120px; }
+  button { padding: .45rem 1rem; border-radius: .35rem; border: 1px solid var(--border);
+           background: var(--card); color: var(--text); cursor: pointer; font-size: .85rem; }
+  button:hover { background: var(--border); }
+  button.primary { background: var(--blue); color: #000; border-color: var(--blue); font-weight: 600; }
+  button.primary:hover { opacity: .85; }
+  button.danger { background: var(--red); color: #fff; border-color: var(--red); }
+  button.danger:hover { opacity: .85; }
+  button:disabled { opacity: .45; cursor: default; }
+  .tabs { display: flex; gap: 0; margin-bottom: 1rem; border-bottom: 1px solid var(--border); }
+  .tab { padding: .4rem 1rem; cursor: pointer; font-size: .875rem; border-bottom: 2px solid transparent;
+         margin-bottom: -1px; color: var(--muted); }
+  .tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+  .msg { font-size: .85rem; margin-top: .5rem; padding: .4rem .75rem; border-radius: .35rem; }
+  .msg-ok  { background: rgba(63,185,80,.12); color: var(--green); border: 1px solid rgba(63,185,80,.3); }
+  .msg-err { background: rgba(248,81,73,.12); color: var(--red);   border: 1px solid rgba(248,81,73,.3); }
+  .progress-wrap { margin-top: .5rem; height: 6px; background: var(--border); border-radius: 3px; display: none; }
+  .progress-bar  { height: 100%; width: 0; background: var(--blue); border-radius: 3px; transition: width .1s; }
+  table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: .35rem .5rem;
+       border-bottom: 1px solid var(--border); }
+  td { padding: .45rem .5rem; border-bottom: 1px solid rgba(48,54,61,.6); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  .current-tag { font-size: .75rem; padding: .1rem .45rem; border-radius: .8rem;
+                 background: rgba(63,185,80,.15); color: var(--green); border: 1px solid rgba(63,185,80,.3); }
+  .spinner { display: inline-block; width: .9rem; height: .9rem; border: 2px solid var(--border);
+             border-top-color: var(--blue); border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #nav { margin-bottom: 1.5rem; font-size: .85rem; }
+  #nav a { color: var(--blue); text-decoration: none; }
+  #nav a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<div id="nav"><a href="/">&#8592; Home</a></div>
+
+<div class="header">
+  <h1>MSS App Admin</h1>
+  <span id="version-badge" class="badge badge-off">Loading...</span>
+</div>
+
+<!-- Current APK -->
+<div class="card">
+  <h2>Current APK</h2>
+  <dl id="current-apk" class="kv">
+    <dt>Status</dt><dd><span class="spinner"></span></dd>
+  </dl>
+</div>
+
+<!-- Upload -->
+<div class="card">
+  <h2>Upload New APK</h2>
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('file')">Upload File</div>
+    <div class="tab" onclick="switchTab('url')">Fetch from URL</div>
+  </div>
+
+  <div id="tab-file" class="tab-panel active">
+    <label>APK file</label>
+    <input type="file" id="apk-file" accept=".apk" style="color:var(--text);font-size:.875rem;width:100%;">
+    <div style="margin-top:.75rem;">
+      <button class="primary" onclick="uploadFile()">Upload</button>
+    </div>
+    <div class="progress-wrap" id="file-progress-wrap"><div class="progress-bar" id="file-progress-bar"></div></div>
+    <div id="file-msg"></div>
+  </div>
+
+  <div id="tab-url" class="tab-panel">
+    <label>APK URL</label>
+    <input type="text" id="apk-url" placeholder="https://expo.dev/artifacts/eas/...apk">
+    <div style="margin-top:.75rem;">
+      <button class="primary" onclick="uploadUrl()">Fetch &amp; Install</button>
+      <span id="url-spinner" style="display:none;margin-left:.5rem;"><span class="spinner"></span> Downloading&hellip;</span>
+    </div>
+    <div id="url-msg"></div>
+  </div>
+</div>
+
+<!-- Version Info -->
+<div class="card">
+  <h2>Version Info</h2>
+  <div class="row">
+    <div>
+      <label>Version name</label>
+      <input type="text" id="v-name" placeholder="1.2.0">
+    </div>
+    <div style="flex:0 0 120px;">
+      <label>Version code</label>
+      <input type="number" id="v-code" placeholder="5" min="1">
+    </div>
+    <div style="flex:0 0 140px;">
+      <label>Min Android</label>
+      <input type="text" id="v-android" placeholder="7.0">
+    </div>
+  </div>
+  <label>Release notes</label>
+  <textarea id="v-notes" placeholder="What's new in this version..."></textarea>
+  <div style="margin-top:.75rem;">
+    <button class="primary" onclick="saveVersion()">Save Version Info</button>
+  </div>
+  <div id="version-msg"></div>
+</div>
+
+<!-- Files -->
+<div class="card">
+  <h2>APK Files</h2>
+  <div id="files-table"><span class="spinner"></span></div>
+</div>
+
+<script>
+const TOKEN = '{{ admin_token }}';
+
+async function api(path, opts = {}) {
+  const headers = { 'X-MSS-Admin-Token': TOKEN, ...(opts.headers || {}) };
+  try {
+    const r = await fetch(path, { ...opts, headers });
+    const body = await r.json().catch(() => ({ ok: false, error: r.statusText }));
+    return body;
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+function showMsg(id, ok, text) {
+  const el = document.getElementById(id);
+  el.className = 'msg ' + (ok ? 'msg-ok' : 'msg-err');
+  el.textContent = text;
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    const panels = ['file', 'url'];
+    t.classList.toggle('active', panels[i] === name);
+  });
+  document.querySelectorAll('.tab-panel').forEach(p => {
+    p.classList.toggle('active', p.id === 'tab-' + name);
+  });
+}
+
+function renderFiles(files) {
+  if (!files || !files.length) {
+    document.getElementById('files-table').innerHTML = '<p style="color:var(--muted);font-size:.875rem;">No APK files found.</p>';
+    return;
+  }
+  const rows = files.map(f => `
+    <tr>
+      <td>${f.filename} ${f.is_current ? '<span class="current-tag">current</span>' : ''}</td>
+      <td>${f.size}</td>
+      <td style="color:var(--muted)">${f.mtime}</td>
+      <td>${f.is_current ? '' : `<button class="danger" onclick="deleteFile('${f.filename}')">Delete</button>`}</td>
+    </tr>`).join('');
+  document.getElementById('files-table').innerHTML = `
+    <table>
+      <thead><tr><th>File</th><th>Size</th><th>Modified</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function renderCurrentApk(version, files) {
+  const current = (files || []).find(f => f.is_current);
+  const vname = version.version_name || '';
+  const notes = version.release_notes || '';
+  if (!current) {
+    document.getElementById('current-apk').innerHTML = '<dt>Status</dt><dd style="color:var(--muted)">No APK uploaded yet</dd>';
+    document.getElementById('version-badge').textContent = 'No APK';
+    return;
+  }
+  document.getElementById('current-apk').innerHTML = [
+    vname   ? `<dt>Version</dt><dd>v${vname}</dd>` : '',
+    `<dt>Size</dt><dd>${current.size}</dd>`,
+    `<dt>Modified</dt><dd>${current.mtime}</dd>`,
+    notes   ? `<dt>Notes</dt><dd>${notes}</dd>` : '',
+  ].join('');
+  document.getElementById('version-badge').className = 'badge badge-ok';
+  document.getElementById('version-badge').textContent = vname ? `v${vname}` : 'APK ready';
+}
+
+function populateVersionForm(v) {
+  document.getElementById('v-name').value    = v.version_name   || '';
+  document.getElementById('v-code').value    = v.version_code   || '';
+  document.getElementById('v-android').value = v.min_android    || '';
+  document.getElementById('v-notes').value   = v.release_notes  || '';
+}
+
+async function refresh() {
+  const data = await api('/admin/api/files');
+  if (data.ok) {
+    renderFiles(data.files);
+    renderCurrentApk(data.version, data.files);
+    populateVersionForm(data.version);
+  }
+}
+
+async function uploadFile() {
+  const input = document.getElementById('apk-file');
+  if (!input.files.length) { showMsg('file-msg', false, 'Please select a file.'); return; }
+  const file = input.files[0];
+  const form = new FormData();
+  form.append('apk', file);
+
+  const wrap = document.getElementById('file-progress-wrap');
+  const bar  = document.getElementById('file-progress-bar');
+  wrap.style.display = 'block';
+  bar.style.width = '0%';
+
+  return new Promise(resolve => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/admin/api/upload');
+    xhr.setRequestHeader('X-MSS-Admin-Token', TOKEN);
+    xhr.upload.onprogress = e => {
+      if (e.lengthComputable) bar.style.width = (e.loaded / e.total * 100) + '%';
+    };
+    xhr.onload = () => {
+      wrap.style.display = 'none';
+      try {
+        const r = JSON.parse(xhr.responseText);
+        if (r.ok) {
+          showMsg('file-msg', true, `Uploaded successfully (${r.size}).`);
+          input.value = '';
+          refresh();
+        } else {
+          showMsg('file-msg', false, r.error || 'Upload failed.');
+        }
+      } catch(e) { showMsg('file-msg', false, 'Unexpected response.'); }
+      resolve();
+    };
+    xhr.onerror = () => { wrap.style.display = 'none'; showMsg('file-msg', false, 'Network error.'); resolve(); };
+    xhr.send(form);
+  });
+}
+
+async function uploadUrl() {
+  const url = document.getElementById('apk-url').value.trim();
+  if (!url) { showMsg('url-msg', false, 'Please enter a URL.'); return; }
+  document.getElementById('url-spinner').style.display = 'inline';
+  document.querySelector('[onclick="uploadUrl()"]').disabled = true;
+
+  const data = await api('/admin/api/upload-url', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  });
+
+  document.getElementById('url-spinner').style.display = 'none';
+  document.querySelector('[onclick="uploadUrl()"]').disabled = false;
+
+  if (data.ok) {
+    showMsg('url-msg', true, `Downloaded and installed successfully (${data.size}).`);
+    document.getElementById('apk-url').value = '';
+    refresh();
+  } else {
+    showMsg('url-msg', false, data.error || 'Failed.');
+  }
+}
+
+async function saveVersion() {
+  const payload = {
+    version_name:  document.getElementById('v-name').value.trim(),
+    version_code:  parseInt(document.getElementById('v-code').value) || 0,
+    release_notes: document.getElementById('v-notes').value.trim(),
+    min_android:   document.getElementById('v-android').value.trim(),
+  };
+  const data = await api('/admin/api/version', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (data.ok) {
+    showMsg('version-msg', true, 'Version info saved.');
+    renderCurrentApk(data.version, null);
+    document.getElementById('version-badge').textContent = payload.version_name ? `v${payload.version_name}` : 'APK ready';
+  } else {
+    showMsg('version-msg', false, data.error || 'Failed.');
+  }
+}
+
+async function deleteFile(filename) {
+  if (!confirm(`Delete ${filename}?`)) return;
+  const data = await api('/admin/api/files/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename }),
+  });
+  if (data.ok) {
+    renderFiles(data.files);
+  } else {
+    alert('Delete failed: ' + (data.error || 'unknown error'));
+  }
+}
+
+refresh();
+</script>
+</body>
+</html>

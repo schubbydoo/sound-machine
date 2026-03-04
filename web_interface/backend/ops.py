@@ -1,11 +1,9 @@
-"""MSS Ops Dashboard — remote diagnostics for beta.
+"""MSS Ops Dashboard — remote diagnostics.
 
 Blueprint providing /ops (HTML) and /ops/api/* (JSON) endpoints.
 
 Security:
-  - Requires MSS_OPS_ENABLED=1 env var to activate API endpoints
-  - Requires X-MSS-Ops-Token header matching MSS_OPS_TOKEN env var
-  - The HTML page always loads but shows "Ops disabled" when not enabled
+  - Always enabled; requires X-MSS-Ops-Token header matching MSS_OPS_TOKEN env var
   - Secrets are never logged or returned in responses
 """
 
@@ -32,7 +30,7 @@ ops_bp = Blueprint("ops", __name__)
 
 # --------------- Configuration ---------------
 
-_OPS_ENABLED = os.environ.get("MSS_OPS_ENABLED", "0") == "1"
+_OPS_ENABLED = True
 _OPS_TOKEN = os.environ.get("MSS_OPS_TOKEN", "")
 
 # Paths inside container that map to host config mounts (see docker-compose.yml)
@@ -62,14 +60,13 @@ def _redact(text: str) -> str:
 # --------------- Auth helpers ---------------
 
 def _ops_api_guard():
-    """Check that ops is enabled and token is valid.
+    """Check that token is valid (if one is configured).
 
     Returns None if authorized, or a (response, status_code) tuple if denied.
+    If MSS_OPS_TOKEN is not set, all requests are allowed.
     """
-    if not _OPS_ENABLED:
-        return jsonify({"ok": False, "error": "Ops not enabled"}), 403
     if not _OPS_TOKEN:
-        return jsonify({"ok": False, "error": "Ops token not configured"}), 500
+        return None  # No token configured — open access
     provided = request.headers.get("X-MSS-Ops-Token", "")
     if provided != _OPS_TOKEN:
         return jsonify({"ok": False, "error": "Invalid ops token"}), 401
