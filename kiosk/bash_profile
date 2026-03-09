@@ -1,0 +1,9 @@
+# Start X on tty1 (kiosk display)
+if [ -z "$DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
+    # Wait for framebuffer device to be ready (vc4 driver can be slow)
+    for i in $(seq 1 30); do
+        [ -e /dev/fb0 ] && break
+        sleep 1
+    done
+    exec startx /home/soundconsole/start-kiosk.sh -- :0 vt1 -nolisten tcp
+fi

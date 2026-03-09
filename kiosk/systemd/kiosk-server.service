@@ -1,0 +1,16 @@
+[Unit]
+Description=Memory Spark Station Kiosk API Server
+After=network.target webui.service
+Wants=webui.service
+
+[Service]
+Type=simple
+User=soundconsole
+WorkingDirectory=/home/soundconsole/kiosk
+Environment=PATH=/home/soundconsole/sound-machine/.venv/bin:/usr/bin:/bin
+ExecStart=/home/soundconsole/sound-machine/.venv/bin/python kiosk_server.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
