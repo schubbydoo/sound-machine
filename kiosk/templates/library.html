@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=800, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Library — Memory Spark Station</title>
+<style>
+:root {
+  --bg:          #121212;
+  --panel:       #1E1E1E;
+  --panel-deep:  #0D0D0D;
+  --divider:     #2A2A2A;
+  --text:        #F2F2F2;
+  --text-sec:    #B8B8B8;
+  --text-muted:  #5A5A5A;
+  --accent:      #7DD3C0;
+  --accent-dim:  rgba(125,211,192,0.15);
+  --accent-glow: rgba(125,211,192,0.30);
+  --danger:      #E57373;
+  --warn:        #F0A04B;
+  --warn-dim:    rgba(240,160,75,0.15);
+}
+
+*, *::before, *::after {
+  box-sizing: border-box; margin: 0; padding: 0;
+  -webkit-tap-highlight-color: transparent;
+  cursor: none !important;
+}
+html, body {
+  width: 800px; height: 480px;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+#page {
+  width: 800px; height: 480px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ══ HEADER ═════════════════════════════════════════════════════ */
+#header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  height: 56px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--divider);
+}
+#header-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+#header-title {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.5px;
+}
+#playlist-badge {
+  background: var(--accent-dim);
+  border: 1px solid var(--accent);
+  border-radius: 20px;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 700;
+  padding: 3px 12px;
+  letter-spacing: 0.02em;
+}
+#play-btn {
+  background: none;
+  border: 1.5px solid var(--text-muted);
+  border-radius: 8px;
+  color: var(--text-sec);
+  font-size: 15px;
+  font-weight: 600;
+  padding: 7px 16px;
+  letter-spacing: 0.03em;
+  transition: border-color 0.15s, color 0.15s;
+}
+#play-btn:active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ══ TAB BAR ════════════════════════════════════════════════════ */
+#tab-bar {
+  display: flex;
+  align-items: center;
+  padding: 10px 20px;
+  gap: 8px;
+  flex-shrink: 0;
+  background: var(--bg);
+}
+.tab-btn {
+  flex: 1;
+  background: var(--panel);
+  border: 1.5px solid transparent;
+  border-radius: 10px;
+  color: var(--text-muted);
+  font-size: 15px;
+  font-weight: 600;
+  padding: 9px 0;
+  text-align: center;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.tab-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+.tab-btn:active:not(.active) {
+  background: #252525;
+}
+
+/* ══ CONTENT AREA ═══════════════════════════════════════════════ */
+#content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: scroll;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 20px 12px;
+}
+
+/* ══ LIST ROWS ══════════════════════════════════════════════════ */
+.row {
+  display: flex;
+  align-items: center;
+  min-height: 68px;
+  padding: 12px 16px;
+  background: var(--panel);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  gap: 12px;
+  transition: background 0.1s;
+}
+.row:active { background: #252525; }
+
+/* Playlist tab rows */
+.row-order {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--accent);
+  width: 28px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.row-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.row-name {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.badge-update {
+  background: var(--warn-dim);
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  color: var(--warn);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 2px 8px;
+  flex-shrink: 0;
+  letter-spacing: 0.04em;
+}
+
+/* Local tab checkbox */
+.row-check {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  border: 2px solid var(--text-muted);
+  background: transparent;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s, background 0.15s;
+}
+.row-check.checked {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.row-check.checked::after {
+  content: '';
+  display: block;
+  width: 10px;
+  height: 6px;
+  border-left: 2.5px solid #121212;
+  border-bottom: 2.5px solid #121212;
+  transform: rotate(-45deg) translateY(-1px);
+}
+
+.row-meta {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.row-source {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+
+/* Row action buttons */
+.row-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.btn-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 9px;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  transition: opacity 0.1s, transform 0.1s;
+  flex-shrink: 0;
+}
+.btn-icon:active { transform: scale(0.92); }
+.btn-download {
+  background: var(--warn-dim);
+  border: 1px solid var(--warn);
+  color: var(--warn);
+}
+.btn-download.loading {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* Circular download button (Available tab + update) */
+.btn-dl-circle {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-size: 20px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.15s, transform 0.1s;
+}
+.btn-dl-circle:active { transform: scale(0.92); }
+.btn-dl-circle.warn {
+  border-color: var(--warn);
+  background: var(--warn-dim);
+  color: var(--warn);
+}
+.btn-dl-circle.loading {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* Progress bar shown while downloading */
+.progress-bar-wrap {
+  width: 100%;
+  height: 3px;
+  background: var(--divider);
+  border-radius: 2px;
+  margin-top: 8px;
+  overflow: hidden;
+  display: none;
+}
+.progress-bar-wrap.active { display: block; }
+.progress-bar-fill {
+  height: 100%;
+  width: 30%;
+  background: var(--accent);
+  border-radius: 2px;
+  animation: slide 1.4s ease-in-out infinite;
+}
+@keyframes slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(430%); }
+}
+
+/* ══ EMPTY / ERROR STATES ═══════════════════════════════════════ */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  gap: 10px;
+}
+.empty-icon  { font-size: 36px; opacity: 0.3; }
+.empty-text  { font-size: 17px; color: var(--text-muted); text-align: center; line-height: 1.5; }
+.loading-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  color: var(--text-muted);
+  font-size: 17px;
+}
+.spinner {
+  display: inline-block;
+  width: 20px; height: 20px;
+  border: 2px solid var(--divider);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-right: 10px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div id="page">
+
+  <!-- Header -->
+  <div id="header">
+    <div id="header-left">
+      <span id="header-title">Library</span>
+      <span id="playlist-badge">Playlist: …</span>
+    </div>
+    <button id="play-btn">&#9654; Play</button>
+  </div>
+
+  <!-- Tab Bar -->
+  <div id="tab-bar">
+    <button class="tab-btn active" id="tab-playlist" data-tab="playlist">Playlist (…)</button>
+    <button class="tab-btn"        id="tab-local"    data-tab="local">Local (…)</button>
+    <button class="tab-btn"        id="tab-available" data-tab="available">Available (…)</button>
+  </div>
+
+  <!-- Content -->
+  <div id="content"></div>
+
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+// ── Tap helper ─────────────────────────────────────────────────
+function onTap(el, fn) {
+  if (!el) return;
+  el.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    if (el.disabled) return;
+    fn(e);
+  });
+}
+
+// ── Navigation ─────────────────────────────────────────────────
+onTap($('play-btn'), () => { window.location.href = '/'; });
+
+// ── State ──────────────────────────────────────────────────────
+let activeTab = 'playlist';
+const tabCounts = { playlist: null, local: null, available: null };
+
+// ── Tab switching ──────────────────────────────────────────────
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  onTap(btn, () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeTab = btn.dataset.tab;
+    loadTab(activeTab);
+  });
+});
+
+function updateTabLabel(tab, count) {
+  const labels = { playlist: 'Playlist', local: 'Local', available: 'Available' };
+  const el = $(`tab-${tab}`);
+  if (el) el.textContent = count !== null
+    ? `${labels[tab]} (${count})`
+    : `${labels[tab]} (…)`;
+}
+
+// ── Render helpers ─────────────────────────────────────────────
+function showLoading() {
+  $('content').innerHTML =
+    '<div class="loading-state"><span class="spinner"></span>Loading…</div>';
+}
+
+function showEmpty(icon, text) {
+  $('content').innerHTML =
+    `<div class="empty-state"><div class="empty-icon">${icon}</div><div class="empty-text">${text}</div></div>`;
+}
+
+function sourceLabel(source) {
+  if (source === 'downloaded') return 'Downloaded';
+  return 'Created on device';
+}
+
+// ── Playlist tab ───────────────────────────────────────────────
+async function loadPlaylist() {
+  showLoading();
+  try {
+    const d = await (await fetch('/api/library/playlist')).json();
+    const list = d.playlist || [];
+    updateTabLabel('playlist', list.length);
+    updateBadge();
+
+    if (!list.length) {
+      showEmpty('🎵', 'No tracks in your playlist.\nGo to Local to add some.');
+      return;
+    }
+
+    const frag = document.createDocumentFragment();
+    list.forEach(t => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.innerHTML = `
+        <div class="row-order">${t.order}</div>
+        <div class="row-body">
+          <span class="row-name">${esc(t.name)}</span>
+          ${t.update_available && t.cloud_stable_id
+            ? `<span class="badge-update">Update</span>` : ''}
+        </div>
+        ${t.update_available && t.cloud_stable_id
+          ? `<button class="btn-dl-circle warn" data-stable="${esc(t.cloud_stable_id)}" title="Update">&#8595;</button>`
+          : ''}
+        <div class="progress-bar-wrap" style="flex-basis:100%"><div class="progress-bar-fill"></div></div>
+      `;
+      row.style.flexWrap = 'wrap';
+      if (t.update_available && t.cloud_stable_id) {
+        const btn = row.querySelector('.btn-dl-circle');
+        const bar = row.querySelector('.progress-bar-wrap');
+        onTap(btn, () => doDownload(t.cloud_stable_id, btn, bar, loadPlaylist));
+      }
+      frag.appendChild(row);
+    });
+    $('content').innerHTML = '';
+    $('content').appendChild(frag);
+  } catch(e) {
+    showEmpty('⚠', 'Failed to load playlist.');
+  }
+}
+
+// ── Local tab ──────────────────────────────────────────────────
+async function loadLocal() {
+  showLoading();
+  try {
+    const d = await (await fetch('/api/library/local')).json();
+    const list = d.local || [];
+    updateTabLabel('local', list.length);
+    updateBadge();
+
+    if (!list.length) {
+      showEmpty('📂', 'No local tracks found.');
+      return;
+    }
+
+    const frag = document.createDocumentFragment();
+    list.forEach(t => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.innerHTML = `
+        <div class="row-check ${t.in_playlist ? 'checked' : ''}" data-id="${t.id}"></div>
+        <div class="row-meta">
+          <div class="row-body">
+            <span class="row-name">${esc(t.name)}</span>
+            ${t.update_available && t.cloud_stable_id
+              ? `<span class="badge-update">Update</span>` : ''}
+          </div>
+          <span class="row-source">${esc(sourceLabel(t.source))}</span>
+        </div>
+        ${t.update_available && t.cloud_stable_id
+          ? `<button class="btn-dl-circle warn" data-stable="${esc(t.cloud_stable_id)}" title="Update available">&#8595;</button>`
+          : ''}
+        <div class="progress-bar-wrap" style="flex-basis:100%"><div class="progress-bar-fill"></div></div>
+      `;
+      row.style.flexWrap = 'wrap';
+
+      // Checkbox tap — toggle playlist membership
+      const check = row.querySelector('.row-check');
+      onTap(check, async () => {
+        check.style.opacity = '0.4';
+        try {
+          const r = await (await fetch(`/api/library/${t.id}/toggle`, {method:'POST'})).json();
+          if (r.ok) {
+            check.classList.toggle('checked', r.in_playlist);
+            updateBadge();
+            updateTabLabel('playlist', null);
+          }
+        } finally {
+          check.style.opacity = '';
+        }
+      });
+
+      // Update button
+      if (t.update_available && t.cloud_stable_id) {
+        const btn = row.querySelector('.btn-dl-circle');
+        const bar = row.querySelector('.progress-bar-wrap');
+        onTap(btn, () => doDownload(t.cloud_stable_id, btn, bar, loadLocal));
+      }
+
+      frag.appendChild(row);
+    });
+    $('content').innerHTML = '';
+    $('content').appendChild(frag);
+  } catch(e) {
+    showEmpty('⚠', 'Failed to load local tracks.');
+  }
+}
+
+// ── Available tab ──────────────────────────────────────────────
+async function loadAvailable() {
+  showLoading();
+  try {
+    const d = await (await fetch('/api/library/available')).json();
+    if (!d.ok) throw new Error(d.error || 'Cloud error');
+    const list = d.available || [];
+    updateTabLabel('available', list.length);
+
+    if (!list.length) {
+      showEmpty('☁', 'All MSS tracks downloaded.');
+      return;
+    }
+
+    const frag = document.createDocumentFragment();
+    list.forEach(t => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.innerHTML = `
+        <div class="row-meta" style="flex:1">
+          <span class="row-name">${esc(t.name)}</span>
+          ${t.instructions
+            ? `<span class="row-source">${esc(t.instructions)}</span>` : ''}
+        </div>
+        <button class="btn-dl-circle" data-stable="${esc(t.stable_id)}" title="Download">&#8595;</button>
+        <div class="progress-bar-wrap" style="flex-basis:100%"><div class="progress-bar-fill"></div></div>
+      `;
+      row.style.flexWrap = 'wrap';
+      const btn = row.querySelector('.btn-dl-circle');
+      const bar = row.querySelector('.progress-bar-wrap');
+      onTap(btn, () => doDownload(t.stable_id, btn, bar, () => {
+        row.style.opacity = '0.3';
+        setTimeout(() => { row.remove(); refreshCounts(); }, 400);
+      }));
+      frag.appendChild(row);
+    });
+    $('content').innerHTML = '';
+    $('content').appendChild(frag);
+  } catch(e) {
+    showEmpty('⚠', `Could not reach cloud server.\n${e.message}`);
+    updateTabLabel('available', '?');
+  }
+}
+
+// ── Download / update ──────────────────────────────────────────
+async function doDownload(stableId, btn, bar, onSuccess) {
+  btn.classList.add('loading');
+  if (bar) bar.classList.add('active');
+  const orig = btn.innerHTML;
+  btn.innerHTML = '&#10006;'; // will be replaced by spinner feel via loading class
+  try {
+    const r = await (await fetch(`/api/library/download/${stableId}`, {method:'POST'})).json();
+    if (bar) bar.classList.remove('active');
+    if (r.ok) {
+      btn.innerHTML = '&#10003;';
+      btn.style.borderColor = 'var(--accent)';
+      btn.style.color = 'var(--accent)';
+      setTimeout(() => { if (onSuccess) onSuccess(); }, 700);
+    } else {
+      btn.innerHTML = orig;
+      btn.classList.remove('loading');
+    }
+  } catch(e) {
+    if (bar) bar.classList.remove('active');
+    btn.innerHTML = orig;
+    btn.classList.remove('loading');
+  }
+}
+
+
+// ── Counts / badge ─────────────────────────────────────────────
+async function updateBadge() {
+  try {
+    const d = await (await fetch('/api/library/state')).json();
+    $('playlist-badge').textContent =
+      `Playlist: ${d.playlist_count}/${d.local_count}`;
+    updateTabLabel('playlist', d.playlist_count);
+    updateTabLabel('local', d.local_count);
+  } catch(e) {}
+}
+
+async function refreshCounts() {
+  await updateBadge();
+  if (activeTab === 'available') updateTabLabel('available', null);
+}
+
+// ── Tab loader ─────────────────────────────────────────────────
+function loadTab(tab) {
+  if (tab === 'playlist')  loadPlaylist();
+  if (tab === 'local')     loadLocal();
+  if (tab === 'available') loadAvailable();
+}
+
+// ── HTML escape ────────────────────────────────────────────────
+function esc(s) {
+  if (!s) return '';
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Init ───────────────────────────────────────────────────────
+updateBadge();
+loadTab('playlist');
+</script>
+</body>
+</html>

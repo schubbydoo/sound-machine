@@ -49,6 +49,7 @@ html, body {
   padding: 10px 20px 8px;
   background: var(--bg);
   flex-shrink: 0;
+  position: relative;
 }
 
 #title {
@@ -70,6 +71,14 @@ html, body {
   white-space: nowrap;
 }
 
+/* ══ TRACK ROW (selector + library button side by side) ════════ */
+#track-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  margin-top: 10px;
+  gap: 8px;
+}
 #track-selector-btn {
   display: flex;
   flex-direction: row;
@@ -79,8 +88,7 @@ html, body {
   border-radius: 12px;
   border: 2px solid var(--accent);
   padding: 10px 22px;
-  margin-top: 10px;
-  width: 100%;
+  flex: 1;
   box-shadow: 0 0 12px var(--accent-glow);
   transition: background 0.12s;
   -webkit-tap-highlight-color: rgba(125,211,192,0.15);
@@ -106,8 +114,30 @@ html, body {
   text-align: center;
   margin-top: 6px;
   line-height: 1.3;
-  padding: 0 10px;
   min-height: 24px;
+  width: 100%;
+}
+
+#library-btn {
+  background: none;
+  border: 1.5px solid var(--text-muted);
+  border-radius: 10px;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 9px 14px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  letter-spacing: 0.03em;
+  transition: border-color 0.15s, color 0.15s;
+  /* match height of track selector */
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+}
+#library-btn:active {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 /* ══ MIDDLE SPACER ══════════════════════════════════════════════ */
@@ -203,7 +233,6 @@ html, body {
 }
 #stop-btn:active { transform: scale(0.96); }
 
-/* Display box — hidden until Hint or Reveal tapped */
 #display-box {
   margin-top: 10px;
   background: var(--panel-deep);
@@ -251,6 +280,8 @@ html, body {
   border-top: 1px solid var(--divider);
   transform: translateY(16px);
   transition: transform 0.2s;
+  max-height: 380px;
+  overflow-y: auto;
 }
 #picker-overlay.open #picker-sheet { transform: translateY(0); }
 
@@ -260,6 +291,9 @@ html, body {
   align-items: center;
   padding: 18px 24px;
   border-bottom: 1px solid var(--divider);
+  position: sticky;
+  top: 0;
+  background: #1E1E1E;
 }
 #picker-title  { font-size: 26px; font-weight: 600; color: var(--text); }
 #picker-done   { font-size: 22px; font-weight: 600; color: var(--accent); background: none; border: none; padding: 4px 0; }
@@ -288,9 +322,12 @@ html, body {
     <div id="title">Memory Spark Station</div>
     <div class="subtitle">Tap and select a Track.</div>
     <div class="subtitle">Press a button to snap the memory back.</div>
-    <div id="track-selector-btn">
-      <span id="selector-text">Loading…</span>
-      <span id="selector-arrow">▼</span>
+    <div id="track-row">
+      <div id="track-selector-btn">
+        <span id="selector-text">Loading…</span>
+        <span id="selector-arrow">▼</span>
+      </div>
+      <button id="library-btn">≡ Library</button>
     </div>
     <div id="instruction-text"></div>
   </div>
@@ -323,13 +360,13 @@ html, body {
 
 <script>
 const S = {
-  activeChannel: null,
-  channels:      {},
-  lastButton:    null,
-  hint:          null,
-  answer:        null,
-  instruction:   '',
-  displayMode:   'none',
+  activeProfileId: null,
+  playlist:        [],
+  lastButton:      null,
+  hint:            null,
+  answer:          null,
+  instruction:     '',
+  displayMode:     'none',
 };
 
 const $ = id => document.getElementById(id);
@@ -341,8 +378,6 @@ function rowColor(n) {
   return '#F5F5F5';
 }
 
-// ── Tap helper — fires on first contact (pointerdown), no delay ─
-// Prevents duplicate fires from pointer→mouse event cascade.
 function onTap(el, fn) {
   el.addEventListener('pointerdown', e => {
     e.preventDefault();
@@ -369,14 +404,15 @@ function dismissDisplay() {
   $('reveal-btn').classList.remove('lit');
 }
 
-// ── Wire all interactive elements ─────────────────────────────
+// ── Wire interactive elements ──────────────────────────────────
 onTap($('track-selector-btn'), openPicker);
-onTap($('hint-btn'),   showHint);
-onTap($('reveal-btn'), showReveal);
-onTap($('stop-btn'),   doStop);
+onTap($('hint-btn'),    showHint);
+onTap($('reveal-btn'),  showReveal);
+onTap($('stop-btn'),    doStop);
 onTap($('display-box'), dismissDisplay);
 onTap($('picker-done'), closePicker);
 onTap($('picker-overlay'), closePicker);
+onTap($('library-btn'), () => { window.location.href = '/library'; });
 $('picker-sheet').addEventListener('pointerdown', e => e.stopPropagation());
 
 // ── Picker ─────────────────────────────────────────────────────
@@ -388,33 +424,30 @@ function closePicker() {
   $('picker-overlay').classList.remove('open');
 }
 function buildPickerList() {
-  const count = Object.keys(S.channels).length;
-  $('picker-title').textContent = `Playlist (${count})`;
+  $('picker-title').textContent = `Playlist (${S.playlist.length})`;
   const list = $('picker-list');
   list.innerHTML = '';
-  for (let ch = 1; ch <= 4; ch++) {
-    const info = S.channels[String(ch)];
-    if (!info) continue;
+  S.playlist.forEach(p => {
     const div = document.createElement('div');
-    div.className = 'picker-item' + (ch === S.activeChannel ? ' selected' : '');
-    div.innerHTML = `<span class="picker-item-text">Track ${ch} — ${info.name}</span>
-                     <span class="picker-check">✓</span>`;
-    onTap(div, () => { setChannel(ch); closePicker(); });
+    div.className = 'picker-item' + (p.id === S.activeProfileId ? ' selected' : '');
+    div.innerHTML = `<span class="picker-item-text">Track ${p.order} \u2014 ${p.name}</span>
+                     <span class="picker-check">\u2713</span>`;
+    onTap(div, () => { selectProfile(p.id); closePicker(); });
     list.appendChild(div);
-  }
+  });
 }
 
 // ── Render ─────────────────────────────────────────────────────
 function render(next) {
-  const btnChanged = next.lastButton    !== S.lastButton;
-  const chChanged  = next.activeChannel !== S.activeChannel;
+  const btnChanged     = next.lastButton     !== S.lastButton;
+  const profileChanged = next.activeProfileId !== S.activeProfileId;
   Object.assign(S, next);
 
-  const ch = S.channels[String(S.activeChannel)] || {};
-  $('selector-text').textContent = S.activeChannel
-    ? `Track ${S.activeChannel} — ${ch.name || '—'}`
-    : 'Select Track';
-  $('instruction-text').textContent = ch.instruction || '';
+  const profile = S.playlist.find(p => p.id === S.activeProfileId) || {};
+  $('selector-text').textContent = profile.order
+    ? `Track ${profile.order} \u2014 ${profile.name}`
+    : (profile.name || 'Select Track');
+  $('instruction-text').textContent = S.instruction || '';
 
   $('btn-label').textContent = S.lastButton
     ? `Button ${S.lastButton}`
@@ -425,7 +458,7 @@ function render(next) {
     setTimeout(() => $('btn-label').style.color = '', 400);
   }
 
-  if (btnChanged || chChanged) dismissDisplay();
+  if (btnChanged || profileChanged) dismissDisplay();
 
   const hasBtn  = !!S.lastButton;
   const hasHint = hasBtn && !!S.hint;
@@ -457,9 +490,9 @@ async function doStop() {
   try { await fetch('/api/stop', { method: 'POST' }); } catch(e) {}
 }
 
-async function setChannel(n) {
+async function selectProfile(id) {
   try {
-    await fetch(`/api/channel/${n}`, { method: 'POST' });
+    await fetch(`/api/profile/select/${id}`, { method: 'POST' });
     await poll();
   } catch(e) {}
 }
@@ -468,12 +501,12 @@ async function poll() {
   try {
     const d = await (await fetch('/api/state')).json();
     render({
-      activeChannel: d.active_channel,
-      channels:      d.channels,
-      lastButton:    d.last_button,
-      hint:          d.hint,
-      answer:        d.answer,
-      instruction:   d.instruction,
+      activeProfileId: d.active_profile_id,
+      playlist:        d.playlist,
+      lastButton:      d.last_button,
+      hint:            d.hint,
+      answer:          d.answer,
+      instruction:     d.instruction,
     });
   } catch(e) {}
 }
