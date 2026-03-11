@@ -622,6 +622,9 @@ function esc(s) {
 // ── Init ───────────────────────────────────────────────────────
 updateBadge();
 loadTab('playlist');
+
+// Block surf's long-press context menu (back/forward/stop/reload)
+document.addEventListener('contextmenu', e => e.preventDefault());
 </script>
 </body>
 </html>

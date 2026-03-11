@@ -513,6 +513,9 @@ async function poll() {
 
 poll();
 setInterval(poll, 500);
+
+// Block surf's long-press context menu (back/forward/stop/reload)
+document.addEventListener('contextmenu', e => e.preventDefault());
 </script>
 </body>
 </html>

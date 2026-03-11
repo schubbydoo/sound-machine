@@ -28,4 +28,6 @@ done
 
 # Launch surf — webkit-based, much lighter than Chromium on 416 MB
 # surf flags: -b = no scrollbars, -d = no disk cache
+# GTK_LONG_PRESS_TIME: raise long-press threshold to 30s to suppress context menu
+export GTK_LONG_PRESS_TIME=30000
 exec surf -b -d http://localhost:8081

@@ -1,13 +1,13 @@
 # Sound Machine (Pico + Pi Zero 2W)
 
-Low-latency wired sound machine using a Raspberry Pi Pico (RP2040) for 16 buttons (with 4 LED buttons) and a Raspberry Pi Zero 2W for audio playback, web UI, and profile management via a physical 4-position rotary switch.
+Low-latency wired sound machine using a Raspberry Pi Pico (RP2040) for 16 buttons (with 4 LED buttons) and a Raspberry Pi Zero 2W for audio playback, web UI, and profile management via a touchscreen kiosk display.
 
 - **Transport**: USB CDC (Pico → Pi over USB)
 - **Audio**: USB DAC on the Pi (WAV files for minimal start latency)
 - **Latency target**: <30–50 ms button→sound using warmed ALSA and WAV
 - **Sound Interruption**: New button presses immediately stop current playback
 - **LED Feedback**: Glass skull LED lights respond to button presses and audio playback
-- **Channel Knob**: 4-position rotary switch for instant profile switching
+- **Touchscreen Kiosk**: 800×480 touch display for profile selection, hint/reveal, and library management
 - **Web Interface**: Full-featured web UI for profile management, bulk uploads (with overwrite support), selective file deletion, metadata editing, and Answer Key/Label generation.
 - **Styling**: Bulma CSS framework for a responsive and modern UI.
 
@@ -19,12 +19,9 @@ Low-latency wired sound machine using a Raspberry Pi Pico (RP2040) for 16 button
 - **LED Control**: GPIO 18 (BCM) on Raspberry Pi Zero (physical pin 12)
   - Provides PWM signal to control LED switch circuit
   - Single wire + ground connection
-- **Channel Knob**: 4-position rotary switch connected to Pi Zero 2W GPIO
-  - Channel 1 (Track 1): GPIO 22 (Yellow)
-  - Channel 2 (Track 2): GPIO 23 (Orange)
-  - Channel 3 (Track 3): GPIO 24 (Red)
-  - Channel 4 (Track 4): GPIO 25 (Brown)
-  - Common: GND (Black)
+- **Touchscreen**: QDtech MPI5001 800×480 display (evdev driver)
+  - Replaces the previous 4-position rotary knob for profile switching
+  - Runs the kiosk UI on `:0 vt1` via `surf` (WebKitGTK)
 - **Pi Zero 2W**: 4-port USB hat (Pico + USB DAC connected)
 - **Pico firmware protocol**:
   - Sends: `P,<id>\n` on press
@@ -37,9 +34,18 @@ sound-machine/
 ├─ daemon/
 │  ├─ soundtrigger.py          # Main daemon (Pico->DB query->play WAV->LED signal)
 │  ├─ led_daemon.py            # LED control daemon (PWM pulsing + flashing)
-│  ├─ channel_monitor.py       # Watches rotary switch (GPIO 22-25) and updates DB
 │  ├─ peek_pico.py             # Simple test for presses + LED override
 │  └─ test_leds.py             # LED blinking test script
+├─ kiosk/
+│  ├─ kiosk_server.py          # Flask server for touchscreen UI (port 8081)
+│  ├─ start-kiosk.sh           # X session startup (surf browser, openbox)
+│  ├─ templates/
+│  │  ├─ kiosk.html            # Main play surface (track select, hint/reveal, stop)
+│  │  └─ library.html          # Library management (playlist curation, cloud download)
+│  ├─ systemd/
+│  │  └─ kiosk-server.service  # Autostart kiosk server
+│  └─ xorg/
+│     └─ 99-touch.conf         # QDtech touchscreen evdev config
 ├─ config/
 │  ├─ wifi.json                # WiFi settings
 │  └─ bt.json                  # Bluetooth settings
@@ -84,29 +90,63 @@ sound-machine/
    ```
 
 ## Configuration & Profiles
-The system now uses a **SQLite database** instead of a JSON file for configuration.
+The system uses a **SQLite database** for all configuration.
 
 - **Profiles**: Create multiple sound profiles (e.g., "Horror", "Trivia", "Sci-Fi").
-- **Tracks (Channels)**: Assign any profile to one of the 4 hardware channels (Rotary Knob positions).
+- **Playlist**: Profiles are added to a playlist and selected from the touchscreen kiosk.
 - **Assignments**: Map any uploaded WAV file to any of the 16 buttons for a specific profile.
 
-All configuration is done via the **Web Interface**.
+All configuration is done via the **Web Interface** (port 8080). The **Kiosk** (port 8081) handles in-game profile selection and hint/reveal.
 
 ## Web Interface
-The sound machine includes a full-featured web interface accessible at `http://localhost:8080` (or your Pi's IP address).
+The sound machine includes a full-featured web interface accessible at `http://<pi-ip>:8080`.
 
 ### Features
 - **Profile Management**: Create, Rename, Delete profiles.
-- **Track Assignment**: Map profiles to the physical rotary knob positions (Tracks 1-4).
-- **Sound Management**: 
+- **Sound Management**:
     - Bulk upload WAV files (auto-assigns to buttons if requested).
     - **Overwrite Support**: Uploading a file with the same name replaces the existing file.
     - **File Management**: Selectively delete multiple audio files to free up space.
 - **Metadata Editor**: Add Descriptions, Categories, and Hints to sounds for gameplay.
-- **Answer Key**: One-click generation of a printable answer key. Includes customizable columns (Track, Button #, Description, Category, Hint, Filename) and persistent settings.
-- **Print Tracks Label**: New feature to print a small, formatted label for the physical device, listing the current "Track" (Channel) assignments.
+- **Answer Key / Worksheet**: One-click printable answer key and worksheet for the current profile.
+- **Print Tracks Label**: Print a label listing track assignments for the physical device.
 - **Real-time Testing**: Play sounds directly from the web dashboard.
 - **Connectivity**: Manage Wi-Fi and Bluetooth connections directly from the UI.
+
+## Kiosk Touchscreen
+The kiosk runs on the local display (`:0 vt1`) using `surf` (WebKitGTK) and is served by a sidecar Flask server on port 8081. It is a **read-only play surface** — all content management is done via the web UI.
+
+### Features
+- **Track Selector**: Tap to pick the active profile from the playlist.
+- **Hint / Reveal**: Show a hint or reveal the answer for the last-pressed button.
+- **Stop**: Stop audio playback.
+- **Library**: Browse local and cloud track packs, manage the playlist.
+
+### Surf Browser — Patched Build
+The stock `surf` package does not suppress the WebKitGTK `context-menu` signal, which causes a navigation menu (Back/Forward/Stop/Reload) to appear on long-press. The binary at `/usr/local/bin/surf` is a locally compiled patched version that suppresses this signal entirely.
+
+**Source location on Pi**: `/tmp/surf-2.1/` (patched `surf.c`).
+
+To rebuild after a `sudo apt upgrade` replaces `/usr/local/bin/surf`:
+```bash
+cd /tmp/surf-2.1
+make && sudo make install
+pkill -f "surf -b"   # kiosk auto-restarts via getty → bash_profile → startx
+```
+
+### Kiosk Startup Chain
+```
+getty@tty1 → autologin → ~/.bash_profile → startx start-kiosk.sh
+  └─ xset (no blanking/screensaver)
+  └─ unclutter (hide cursor)
+  └─ openbox (window manager)
+  └─ GTK_LONG_PRESS_TIME=30000 surf -b -d http://localhost:8081
+```
+
+To reload the kiosk after template changes (no reboot needed):
+```bash
+pkill -f "surf -b"   # surf exits → xinit exits → getty respawns → kiosk restarts
+```
 
 ### Starting the Web Server manually
 ```bash
@@ -120,19 +160,22 @@ Four systemd units manage auto-start on boot:
 
 - `sound-led-daemon.service`: Starts LED control daemon (auto-restarts on failure)
 - `soundtrigger.service`: Starts audio daemon (auto-restarts on failure)
-- `sound-channel-monitor.service`: Monitors the rotary knob for profile switching
-- `webui.service`: Serves the Web Interface (gunicorn)
+- `webui.service`: Serves the Web Interface on port 8080 (gunicorn)
+- `kiosk-server.service`: Serves the Kiosk UI on port 8081 (Flask)
+
+The kiosk display (surf browser) is started by `getty@tty1` autologin, not systemd directly.
 
 ### Service Management
 ```bash
 # Check status
 systemctl status sound-led-daemon.service
 systemctl status soundtrigger.service
-systemctl status sound-channel-monitor.service
+systemctl status kiosk-server.service
+systemctl status webui.service
 
 # View logs
 journalctl -u soundtrigger.service -f
-journalctl -u sound-channel-monitor.service -f
+journalctl -u kiosk-server.service -f
 ```
 
 ## LED Control System
@@ -142,5 +185,6 @@ The system includes a sophisticated **autonomous LED daemon** that provides real
 
 ## Troubleshooting
 - **No Sound**: Ensure `aplay -l` shows your device. Check volume with `amixer -c 0`.
-- **Knob Not Working**: Check `journalctl -u sound-channel-monitor.service`. Ensure GPIOs 22-25 are wired correctly to GND via the switch.
 - **Database Locked**: If the web UI hangs, restart the service: `sudo systemctl restart webui.service`.
+- **Kiosk blank / not loading**: Check `systemctl status kiosk-server.service`. Restart with `pkill -f "surf -b"`.
+- **Context menu appearing on long-press**: The patched surf build at `/usr/local/bin/surf` may have been overwritten by `apt upgrade`. Rebuild from `/tmp/surf-2.1/` — see **Surf Browser — Patched Build** above.

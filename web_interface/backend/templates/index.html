@@ -89,31 +89,6 @@
                     </button>
                 </div>
             </div>
-            <div class="level-right">
-                <div class="level-item">
-                    <div class="field has-addons">
-                        <div class="control">
-                            <a class="button is-static">Assigned Track</a>
-                        </div>
-                        <div class="control">
-                            <div class="select">
-                                <select id="channelSelect">
-                                    <option value="">Select Track...</option>
-                                    {% for i in range(1, 5) %}
-                                    <option value="{{ i }}" 
-                                        {% if channels.get(i) and channels[i].id == active_profile_id %}selected{% endif %}>
-                                        Track {{ i }} {% if channels.get(i) %}({{ channels[i].name }}){% endif %}
-                                    </option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                        </div>
-                        <div class="control">
-                            <button class="button is-link" onclick="assignChannel()">Assign</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
         </div>
 
         <!-- Row 2: Description and Printing -->
@@ -139,17 +114,11 @@
                         <div class="dropdown-menu" id="dropdown-menu" role="menu">
                             <div class="dropdown-content">
                                 <a href="/print_key/{{ active_profile_id }}" target="_blank" class="dropdown-item">
-                                    Answer Key (Current)
-                                </a>
-                                <a href="/print_key/assigned" target="_blank" class="dropdown-item">
-                                    Answer Key (All Assigned)
+                                    Answer Key
                                 </a>
                                 <hr class="dropdown-divider">
                                 <a href="/print_worksheet/{{ active_profile_id }}" target="_blank" class="dropdown-item">
-                                    Worksheet (Current)
-                                </a>
-                                <a href="/print_worksheet/assigned" target="_blank" class="dropdown-item">
-                                    Worksheet (All Assigned)
+                                    Worksheet
                                 </a>
                             </div>
                         </div>
@@ -484,20 +453,6 @@ async function saveInstructions() {
     else alert('Error saving instructions');
 }
 
-async function assignChannel() {
-    const chn = document.getElementById('channelSelect').value;
-    if (!chn) {
-        alert("Please select a track first.");
-        return;
-    }
-    const fd = new FormData();
-    fd.append('channel', chn);
-    fd.append('profile_id', '{{ active_profile_id }}');
-    const res = await fetch('/api/channel/assign', {method: 'POST', body: fd});
-    const js = await res.json();
-    if (js.ok) location.reload();
-    else alert(js.error);
-}
 
 async function uploadFiles(ev) {
     ev.preventDefault();
