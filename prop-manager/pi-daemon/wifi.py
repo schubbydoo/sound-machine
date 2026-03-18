@@ -88,7 +88,7 @@ def _get_wifi_profiles() -> list[str]:
     profiles = []
     for line in out.splitlines():
         parts = line.split(":", 1)
-        if len(parts) == 2 and parts[1] == "wifi":
+        if len(parts) == 2 and parts[1] in ("wifi", "802-11-wireless"):
             profiles.append(parts[0])
     return profiles
 
