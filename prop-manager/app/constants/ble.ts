@@ -15,6 +15,8 @@ export type PropStatus =
   | 'wifi_connected'
   | 'wifi_failed'
   | 'ap_mode'
+  | 'saving'
+  | 'wifi_saved'
   | 'disconnected';
 
 export interface PropInfo {

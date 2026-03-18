@@ -195,7 +195,9 @@ class PropManagerDaemon:
         command = command.strip().strip('"')
         logger.info("Command: %s", command)
 
-        if command == "connect_wifi":
+        if command == "save_wifi":
+            await self._save_wifi()
+        elif command == "connect_wifi":
             await self._connect_wifi()
         elif command == "disconnect_wifi":
             await self.loop.run_in_executor(None, wifi.disconnect)
@@ -205,6 +207,22 @@ class PropManagerDaemon:
         elif command == "reboot":
             logger.info("Rebooting system...")
             os.system("sudo reboot")
+
+    async def _save_wifi(self) -> None:
+        if not self.wifi_ssid:
+            logger.error("No SSID stored")
+            self.set_status("wifi_failed")
+            return
+
+        self.set_status("saving")
+        success, msg = await self.loop.run_in_executor(
+            None, wifi.save_credentials, self.wifi_ssid, self.wifi_password
+        )
+        if success:
+            self.set_status("wifi_saved", ssid=self.wifi_ssid)
+        else:
+            logger.error("Failed to save credentials: %s", msg)
+            self.set_status("wifi_failed")
 
     async def _connect_wifi(self) -> None:
         if not self.wifi_ssid:

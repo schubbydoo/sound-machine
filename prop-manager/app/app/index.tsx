@@ -67,6 +67,13 @@ export default function MainScreen() {
     [sendCommand]
   );
 
+  const handleReboot = useCallback(
+    async (deviceId: string) => {
+      await sendCommand(deviceId, 'reboot');
+    },
+    [sendCommand]
+  );
+
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     await refresh();
@@ -127,6 +134,7 @@ export default function MainScreen() {
                 propDevice={propDevice}
                 onConnect={() => handleConnect(id)}
                 onChangeNetwork={() => handleChangeNetwork(id)}
+                onReboot={() => handleReboot(id)}
               />
             )}
             contentContainerStyle={styles.list}

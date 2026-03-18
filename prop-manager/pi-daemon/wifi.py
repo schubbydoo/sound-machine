@@ -95,6 +95,47 @@ def _get_wifi_profiles() -> list[str]:
 
 # ── Connection management ───────────────────────────────────────────────────
 
+def save_credentials(ssid: str, password: str) -> tuple[bool, str]:
+    """
+    Save WiFi credentials as a NetworkManager profile with autoconnect=yes.
+    Does NOT connect or disturb the active network — takes effect on reboot.
+    Returns (success, message).
+    """
+    logger.info("Saving credentials for SSID: %s", ssid)
+    existing = _get_wifi_profiles()
+
+    if ssid in existing:
+        logger.info("Updating existing profile for '%s'", ssid)
+        rc, _, err = _run([
+            "nmcli", "connection", "modify", ssid,
+            "wifi-sec.key-mgmt", "wpa-psk",
+            "wifi-sec.psk", password,
+            "connection.autoconnect", "yes",
+            "connection.autoconnect-priority", "10",
+        ])
+        if rc != 0:
+            logger.error("modify failed: %s", err)
+            return False, f"Failed to update profile: {err}"
+    else:
+        logger.info("Creating new profile for '%s'", ssid)
+        rc, _, err = _run([
+            "nmcli", "connection", "add",
+            "type", "wifi",
+            "con-name", ssid,
+            "ssid", ssid,
+            "wifi-sec.key-mgmt", "wpa-psk",
+            "wifi-sec.psk", password,
+            "connection.autoconnect", "yes",
+            "connection.autoconnect-priority", "10",
+        ])
+        if rc != 0:
+            logger.error("add failed: %s", err)
+            return False, f"Failed to create profile: {err}"
+
+    logger.info("Credentials saved for '%s' — will autoconnect on next boot", ssid)
+    return True, f"Profile saved for {ssid}"
+
+
 def connect(ssid: str, password: str) -> tuple[bool, str]:
     """
     Connect to a WiFi network, creating or updating a profile.

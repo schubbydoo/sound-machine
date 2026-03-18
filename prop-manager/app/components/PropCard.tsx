@@ -14,6 +14,7 @@ interface Props {
   propDevice: PropDevice;
   onConnect: () => void;
   onChangeNetwork: () => void;
+  onReboot: () => void;
 }
 
 const STATUS_COLORS: Record<PropStatus, string> = {
@@ -25,6 +26,8 @@ const STATUS_COLORS: Record<PropStatus, string> = {
   wifi_connected: '#38a169',
   wifi_failed: '#e53e3e',
   ap_mode: '#38a169',
+  saving: '#d69e2e',
+  wifi_saved: '#2b6cb0',
   disconnected: '#888',
 };
 
@@ -37,10 +40,12 @@ const STATUS_LABELS: Record<PropStatus, string> = {
   wifi_connected: 'Connected',
   wifi_failed: 'Failed',
   ap_mode: 'AP Mode',
+  saving: 'Saving…',
+  wifi_saved: 'Saved — reboot to connect',
   disconnected: 'Disconnected',
 };
 
-export function PropCard({ propDevice, onConnect, onChangeNetwork }: Props) {
+export function PropCard({ propDevice, onConnect, onChangeNetwork, onReboot }: Props) {
   const { device, info, status, isConnecting } = propDevice;
   const name = info?.name ?? device.name ?? device.id;
   const port = info?.port ?? 8080;
@@ -94,6 +99,12 @@ export function PropCard({ propDevice, onConnect, onChangeNetwork }: Props) {
         {isFailed && !isConnecting && (
           <TouchableOpacity style={[styles.btn, styles.btnDanger]} onPress={onConnect}>
             <Text style={styles.btnText}>Retry</Text>
+          </TouchableOpacity>
+        )}
+
+        {state === 'wifi_saved' && !isConnecting && (
+          <TouchableOpacity style={[styles.btn, styles.btnReboot]} onPress={onReboot}>
+            <Text style={styles.btnText}>Reboot to Connect</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -152,6 +163,7 @@ const styles = StyleSheet.create({
   btnPrimary: { backgroundColor: '#3182ce' },
   btnSecondary: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#4a5568' },
   btnDanger: { backgroundColor: '#c53030' },
+  btnReboot: { backgroundColor: '#2b6cb0' },
   btnText: { color: '#fff', fontWeight: '600', fontSize: 14 },
   btnTextSecondary: { color: '#a0aec0', fontWeight: '600', fontSize: 14 },
 });

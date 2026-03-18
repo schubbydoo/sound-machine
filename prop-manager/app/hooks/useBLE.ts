@@ -204,7 +204,7 @@ export function useBLE() {
 
         await device.writeCharacteristicWithResponseForService(
           SERVICE_UUID, CHAR_COMMAND,
-          encode('connect_wifi'),
+          encode('save_wifi'),
         );
       } catch (err) {
         console.error('Provision error for', deviceId, err);
