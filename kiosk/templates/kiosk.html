@@ -71,13 +71,12 @@ html, body {
   white-space: nowrap;
 }
 
-/* ══ TRACK ROW (selector + library button side by side) ════════ */
+/* ══ TRACK ROW ══════════════════════════════════════════════════ */
 #track-row {
   display: flex;
   align-items: center;
   width: 100%;
   margin-top: 10px;
-  gap: 8px;
 }
 #track-selector-btn {
   display: flex;
@@ -119,24 +118,19 @@ html, body {
 }
 
 #library-btn {
+  position: absolute;
+  top: 10px;
+  right: 20px;
   background: none;
-  border: 1.5px solid var(--text-muted);
-  border-radius: 10px;
+  border: none;
   color: var(--text-muted);
-  font-size: 14px;
-  font-weight: 600;
-  padding: 9px 14px;
-  white-space: nowrap;
-  flex-shrink: 0;
-  letter-spacing: 0.03em;
-  transition: border-color 0.15s, color 0.15s;
-  /* match height of track selector */
-  align-self: stretch;
-  display: flex;
-  align-items: center;
+  font-size: 26px;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 8px;
+  transition: color 0.15s;
 }
 #library-btn:active {
-  border-color: var(--accent);
   color: var(--accent);
 }
 
@@ -319,6 +313,7 @@ html, body {
 <div id="app">
 
   <div id="scroll-area">
+    <button id="library-btn">&#9776;</button>
     <div id="title">Memory Spark Station</div>
     <div class="subtitle">Tap and select a Track.</div>
     <div class="subtitle">Press a button to snap the memory back.</div>
@@ -327,7 +322,6 @@ html, body {
         <span id="selector-text">Loading…</span>
         <span id="selector-arrow">▼</span>
       </div>
-      <button id="library-btn">≡ Library</button>
     </div>
     <div id="instruction-text"></div>
   </div>
@@ -513,9 +507,6 @@ async function poll() {
 
 poll();
 setInterval(poll, 500);
-
-// Block surf's long-press context menu (back/forward/stop/reload)
-document.addEventListener('contextmenu', e => e.preventDefault());
 </script>
 </body>
 </html>
