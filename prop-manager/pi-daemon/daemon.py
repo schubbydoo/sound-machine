@@ -141,7 +141,14 @@ class PropManagerDaemon:
             return self._status_bytes()
         return bytearray()
 
-    async def handle_write(
+    def handle_write(
+        self, characteristic: BlessGATTCharacteristic, value: bytearray, **kwargs
+    ) -> None:
+        asyncio.run_coroutine_threadsafe(
+            self._handle_write_async(characteristic, value, **kwargs), self.loop
+        )
+
+    async def _handle_write_async(
         self, characteristic: BlessGATTCharacteristic, value: bytearray, **kwargs
     ) -> None:
         uid = str(characteristic.uuid).lower()
