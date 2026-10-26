@@ -21,33 +21,6 @@ def nm(cmd: str):
     except subprocess.CalledProcessError as e:
         return e.output
 
-def wifi_load_config():
-    from . import nm_wifi
-    return {"autoConnect": False, "known": nm_wifi.list_known()}
-
-def wifi_save_config(cfg):
-    from . import nm_wifi
-    for ssid, entry in cfg.get("known", {}).items():
-        pwd = entry.get("password", "")
-        if pwd:
-            nm_wifi.save_credentials(ssid, pwd)
-
-def wifi_scan():
-    from . import nm_wifi
-    return nm_wifi.scan()
-
-def wifi_connect(ssid, password):
-    from . import nm_wifi
-    return nm_wifi.connect(ssid, password)
-
-def wifi_forget(ssid):
-    from . import nm_wifi
-    return nm_wifi.forget(ssid)
-
-def wifi_set_autopref(ssid, auto, priority):
-    from . import nm_wifi
-    return nm_wifi.set_autopref(ssid, auto, priority)
-
 # BT Helpers
 def bt_load_config():
     if BT_CONFIG_PATH.exists():

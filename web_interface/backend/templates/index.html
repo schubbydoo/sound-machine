@@ -1,12 +1,8 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Sound Machine Manager</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
-  <script defer src="https://use.fontawesome.com/releases/v5.15.4/js/all.js"></script>
-  <style>
+{% extends "propkit/base.html" %}
+{% block title %}Memory Spark Station{% endblock %}
+{% block head_extra %}
+<script defer src="https://use.fontawesome.com/releases/v5.15.4/js/all.js"></script>
+<style>
     .audio-row { align-items: center; }
     .is-clickable { cursor: pointer; }
     .channel-badge { margin-left: 0.5rem; }
@@ -30,22 +26,8 @@
     tr.is-editing .view-mode { display: none; }
     tr.is-editing .edit-mode { display: block; }
   </style>
-</head>
-<body>
-<nav class="navbar is-primary" role="navigation" aria-label="main navigation">
-  <div class="navbar-brand">
-    <a class="navbar-item" href="/">
-      <strong>Sound Machine</strong>
-    </a>
-  </div>
-  <div class="navbar-menu">
-    <div class="navbar-start">
-      <a class="navbar-item is-active" href="/">Home</a>
-      <a class="navbar-item" href="/wifi">Wi-Fi</a>
-      <a class="navbar-item" href="/bt">Bluetooth</a>
-    </div>
-  </div>
-</nav>
+{% endblock %}
+{% block content %}
 
 <section class="section">
   <div class="container">
@@ -675,5 +657,4 @@ async function deleteSelectedFiles() {
     }
 }
 </script>
-</body>
-</html>
+{% endblock %}

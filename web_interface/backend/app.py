@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import sys
 import shutil
 import tempfile
 import contextlib
@@ -14,12 +15,21 @@ import time
 import hashlib
 import zipfile
 from pathlib import Path
-from flask import Flask, render_template, request, jsonify, send_file, Response
+from flask import Flask, render_template, request, jsonify, send_file, Response, redirect
 
 try:
     from werkzeug.utils import secure_filename
 except ImportError:
     from werkzeug.utils import secure_filename
+
+# propkit (shared System tab / header) and netguard (network monitor) are cloned beside this
+# repo (~/propkit, ~/netguard). Fix bugs THERE; never copy them into this tree.
+for _name, _env in (("netguard", "NETGUARD_DIR"), ("propkit", "PROPKIT_DIR")):
+    _dir = os.environ.get(_env, str(Path.home() / _name))
+    if Path(_dir).is_dir() and _dir not in sys.path:
+        sys.path.insert(0, _dir)
+import propkit
+from propkit import flask_app as propkit_flask
 
 from . import network_utils as nu
 from .storage import get_storage_adapter, get_trackpack_updated_at as storage_get_updated_at
@@ -169,7 +179,7 @@ def index():
 
     conn.close()
     
-    return render_template('index.html', 
+    return render_template("index.html", active_page="tracks",
                            profiles=profiles, 
                            active_profile_id=int(active_profile_id) if active_profile_id else None,
                            mappings=mappings,
@@ -862,13 +872,24 @@ def api_server_info():
         }
     })
 
-# ---------------- Network Routes ----------------
+# ---------------- System tab (propkit) ----------------
+
+BASE_DIR = Path(__file__).resolve().parent.parent.parent       # the git checkout
+STATE_DIR = BASE_DIR / "log" / "netguard"                      # written by netguard-monitor.service
+
+propkit_cfg = propkit.PropConfig(
+    name="Memory Spark Station", brand=("MEMORY", "SPARK"),
+    tabs=[("tracks", "/", "Tracks"), ("bluetooth", "/bt", "Bluetooth"), ("system", "/system", "System")],
+    service_name="webui.service", base_dir=str(BASE_DIR), state_dir=str(STATE_DIR),
+    hotspot_profile="PropManager-AP")
+propkit_flask.install(app, propkit_cfg)
 
 @app.route('/wifi')
 def wifi_page():
-    nets = nu.wifi_scan()
-    wcfg = nu.wifi_load_config()
-    return render_template('wifi.html', nets=nets, wcfg=wcfg)
+    """The old Wi-Fi page now lives on the System tab."""
+    return redirect('/system', 302)
+
+# ---------------- Network Routes ----------------
 
 @app.route('/bt')
 def bt_page():
@@ -876,69 +897,13 @@ def bt_page():
     paired = nu.bt_paired()
     for p in paired: p['connected'] = nu.bt_is_connected(p['mac'])
     bcfg = nu.bt_load_config()
-    return render_template('bt.html', devices=devices, paired=paired, bcfg=bcfg)
+    return render_template('bt.html', devices=devices, paired=paired, bcfg=bcfg, active_page="bluetooth")
 
 @app.route('/bt/paired')
 def bt_paired_api():
     items = nu.bt_paired()
     for p in items: p['connected'] = nu.bt_is_connected(p['mac'])
     return jsonify({'ok': True, 'paired': items})
-
-@app.post('/wifi/connect')
-def wifi_connect_route():
-    data = request.json if request.is_json else request.form
-    ssid = data.get('ssid')
-    password = data.get('password', '')
-    if not ssid: return jsonify({'ok': False, 'error': 'Missing SSID'}), 400
-    out = nu.wifi_connect(ssid, password)
-    return jsonify({'ok': True, 'output': out})
-
-@app.post('/wifi/remember')
-def wifi_remember():
-    data = request.json if request.is_json else request.form
-    ssid = data.get('ssid')
-    password = data.get('password', '')
-    if not ssid: return jsonify({'ok': False, 'error': 'Missing SSID'}), 400
-    cfg = nu.wifi_load_config()
-    cfg.setdefault('known', {})[ssid] = cfg['known'].get(ssid, {"password":"", "auto": False, "priority": 0})
-    cfg['known'][ssid]['password'] = password
-    nu.wifi_save_config(cfg)
-    return jsonify({'ok': True})
-
-@app.post('/wifi/forget')
-def wifi_forget_route():
-    data = request.json if request.is_json else request.form
-    ssid = data.get('ssid')
-    if not ssid: return jsonify({'ok': False, 'error': 'Missing SSID'}), 400
-    out = nu.wifi_forget(ssid)
-    cfg = nu.wifi_load_config()
-    if cfg.get('known', {}).pop(ssid, None) is not None:
-        nu.wifi_save_config(cfg)
-    return jsonify({'ok': True, 'output': out})
-
-@app.post('/wifi/auto')
-def wifi_auto_toggle():
-    payload = request.json if request.is_json else request.form
-    ssid = payload.get('ssid')
-    enable = payload.get('enable')
-    priority = payload.get('priority')
-    if ssid:
-        try: prio = int(priority if priority is not None else 0)
-        except: prio = 0
-        en = str(enable).lower() in ('1','true','yes','on')
-        cfg = nu.wifi_load_config()
-        cfg.setdefault('known', {})[ssid] = cfg['known'].get(ssid, {"password":"", "auto": False, "priority": 0})
-        cfg['known'][ssid]['auto'] = en
-        cfg['known'][ssid]['priority'] = prio
-        nu.wifi_save_config(cfg)
-        nm_out = nu.wifi_set_autopref(ssid, en, prio)
-        return jsonify({'ok': True, 'ssid': ssid, 'auto': en, 'priority': prio, 'nm': nm_out})
-    else:
-        en = str(enable).lower() in ('1', 'true', 'yes', 'on') if enable is not None else False
-        cfg = nu.wifi_load_config()
-        cfg['autoConnect'] = en
-        nu.wifi_save_config(cfg)
-        return jsonify({'ok': True, 'autoConnect': en})
 
 @app.post('/bt/connect')
 def bt_connect_route():
