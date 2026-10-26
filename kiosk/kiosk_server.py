@@ -285,15 +285,17 @@ def api_library_playlist():
     try:
         for tp in _fetch_cloud_trackpacks(timeout=5):
             cloud_revisions[tp['stable_id']] = tp['revision']
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[library/playlist] cloud fetch failed: {type(e).__name__}: {e}", flush=True)
 
     result = []
     for seq, r in enumerate(rows, start=1):
         update_available = False
-        if r['cloud_stable_id'] and r['cloud_revision']:
+        if r['cloud_stable_id']:
             cr = cloud_revisions.get(r['cloud_stable_id'])
-            update_available = bool(cr and cr != r['cloud_revision'])
+            if cr:
+                # No local revision recorded → treat as update available
+                update_available = not r['cloud_revision'] or cr != r['cloud_revision']
         result.append({
             'id':               r['id'],
             'name':             r['name'],
@@ -316,15 +318,17 @@ def api_library_local():
     try:
         for tp in _fetch_cloud_trackpacks(timeout=5):
             cloud_revisions[tp['stable_id']] = tp['revision']
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[library/local] cloud fetch failed: {type(e).__name__}: {e}", flush=True)
 
     result = []
     for r in rows:
         update_available = False
-        if r['cloud_stable_id'] and r['cloud_revision']:
+        if r['cloud_stable_id']:
             cr = cloud_revisions.get(r['cloud_stable_id'])
-            update_available = bool(cr and cr != r['cloud_revision'])
+            if cr:
+                # No local revision recorded → treat as update available
+                update_available = not r['cloud_revision'] or cr != r['cloud_revision']
         result.append({
             'id':               r['id'],
             'name':             r['name'],

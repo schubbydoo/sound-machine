@@ -187,4 +187,5 @@ The system includes a sophisticated **autonomous LED daemon** that provides real
 - **No Sound**: Ensure `aplay -l` shows your device. Check volume with `amixer -c 0`.
 - **Database Locked**: If the web UI hangs, restart the service: `sudo systemctl restart webui.service`.
 - **Kiosk blank / not loading**: Check `systemctl status kiosk-server.service`. Restart with `pkill -f "surf -b"`.
+- **Kiosk reloads on boot**: The Pi Zero has no battery-backed RTC, so the clock resets on every power cycle. When NTP syncs after WiFi connects, a large clock correction causes the surf/WebKit browser to reload mid-session. Fix: install `fake-hwclock` so the clock is saved across reboots and NTP only needs a small correction. `SETUP_SYSTEMD.sh` now handles this automatically.
 - **Context menu appearing on long-press**: The patched surf build at `/usr/local/bin/surf` may have been overwritten by `apt upgrade`. Rebuild from `/tmp/surf-2.1/` — see **Surf Browser — Patched Build** above.

@@ -16,7 +16,13 @@ fi
 PROJECT_DIR="/home/soundconsole/sound-machine"
 
 echo ""
-echo "Step 1: Installing service files..."
+echo "Step 1: Installing fake-hwclock (prevents large NTP clock jumps on boot)..."
+apt install -y fake-hwclock
+fake-hwclock save
+echo "  ✓ fake-hwclock installed and time saved"
+
+echo ""
+echo "Step 2: Installing service files..."
 echo "  - Copying sound-led-daemon.service"
 cp "$PROJECT_DIR/systemd/sound-led-daemon.service" /etc/systemd/system/
 echo "  - Copying soundtrigger.service"
@@ -25,24 +31,24 @@ echo "  - Copying sound-channel-monitor.service"
 cp "$PROJECT_DIR/systemd/sound-channel-monitor.service" /etc/systemd/system/
 
 echo ""
-echo "Step 2: Reloading systemd daemon..."
+echo "Step 3: Reloading systemd daemon..."
 systemctl daemon-reload
 
 echo ""
-echo "Step 3: Enabling services to start on boot..."
+echo "Step 4: Enabling services to start on boot..."
 systemctl enable sound-led-daemon.service
 systemctl enable soundtrigger.service
 systemctl enable sound-channel-monitor.service
 
 echo ""
-echo "Step 4: Starting services now..."
+echo "Step 5: Starting services now..."
 systemctl start sound-led-daemon.service
 sleep 1
 systemctl start soundtrigger.service
 systemctl start sound-channel-monitor.service
 
 echo ""
-echo "Step 5: Verifying services..."
+echo "Step 6: Verifying services..."
 echo "  LED Daemon status:"
 systemctl status sound-led-daemon.service --no-pager || true
 echo ""
