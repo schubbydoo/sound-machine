@@ -1,0 +1,15 @@
+[Unit]
+Description=Memory Spark Station network monitor (netguard)
+After=network.target NetworkManager.service
+
+[Service]
+Type=simple
+User=soundconsole
+WorkingDirectory=/home/soundconsole/sound-machine
+ExecStart=/usr/bin/python3 /home/soundconsole/sound-machine/daemon/netguard_monitor.py
+Restart=on-failure
+RestartSec=5
+Nice=10
+
+[Install]
+WantedBy=multi-user.target
