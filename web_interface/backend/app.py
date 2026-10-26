@@ -881,7 +881,10 @@ propkit_cfg = propkit.PropConfig(
     name="Memory Spark Station", brand=("MEMORY", "SPARK"),
     tabs=[("tracks", "/", "Tracks"), ("bluetooth", "/bt", "Bluetooth"), ("system", "/system", "System")],
     service_name="webui.service", base_dir=str(BASE_DIR), state_dir=str(STATE_DIR),
-    hotspot_profile="PropManager-AP")
+    hotspot_profile="PropManager-AP",
+    # One shared login for the whole web admin once a password is set at /setup (open until then).
+    # Discovery stays public so the phone app can still identify the station.
+    login=True, login_public_paths=("/api/server-info",))
 propkit_flask.install(app, propkit_cfg)
 
 @app.route('/wifi')
