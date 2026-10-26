@@ -1,0 +1,10 @@
+{
+  "autoConnect": false,
+  "known": {
+    "ExampleSSID": {
+      "password": "CHANGE_ME",
+      "auto": true,
+      "priority": 0
+    }
+  }
+}

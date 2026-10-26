@@ -35,3 +35,6 @@ Sounds/**
 *.pid
 .claude/
 data/
+
+# WiFi credentials (local only; see config/wifi.json.example)
+config/wifi.json

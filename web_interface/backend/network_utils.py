@@ -22,88 +22,31 @@ def nm(cmd: str):
         return e.output
 
 def wifi_load_config():
-    if WIFI_CONFIG_PATH.exists():
-        try:
-            with open(WIFI_CONFIG_PATH, 'r', encoding='utf-8') as f:
-                cfg = json.load(f)
-        except:
-            cfg = {}
-    else:
-        cfg = {"autoConnect": False, "known": {}}
-    known = cfg.get("known", {})
-    normalized = {}
-    if isinstance(known, dict):
-        for ssid, val in known.items():
-            if isinstance(val, dict):
-                normalized[ssid] = {
-                    "password": val.get("password", ""),
-                    "auto": bool(val.get("auto", False)),
-                    "priority": int(val.get("priority", 0)),
-                }
-            else:
-                normalized[ssid] = {"password": str(val or ""), "auto": False, "priority": 0}
-    cfg["known"] = normalized
-    return cfg
+    from . import nm_wifi
+    return {"autoConnect": False, "known": nm_wifi.list_known()}
 
 def wifi_save_config(cfg):
-    WIFI_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(WIFI_CONFIG_PATH, 'w', encoding='utf-8') as f:
-        json.dump(cfg, f, indent=2)
+    from . import nm_wifi
+    for ssid, entry in cfg.get("known", {}).items():
+        pwd = entry.get("password", "")
+        if pwd:
+            nm_wifi.save_credentials(ssid, pwd)
 
 def wifi_scan():
-    _ = nm('nmcli dev wifi rescan')
-    out = nm('nmcli -t -f SSID,SECURITY,SIGNAL dev wifi list')
-    if not out.strip():
-        out = nm('nmcli -t -f SSID,SECURITY,SIGNAL dev wifi')
-    nets = []
-    for line in out.splitlines():
-        if not line: continue
-        parts = line.split(':')
-        if len(parts) < 3: continue
-        ssid, sec, sig = parts[0], parts[1], parts[2]
-        if ssid == '': continue
-        nets.append({"ssid": ssid, "security": sec, "signal": int(sig or 0)})
-    best = {}
-    for n in nets:
-        if n["ssid"] not in best or n["signal"] > best[n["ssid"]]["signal"]:
-            best[n["ssid"]] = n
-    return sorted(best.values(), key=lambda x: -x["signal"])
+    from . import nm_wifi
+    return nm_wifi.scan()
 
 def wifi_connect(ssid, password):
-    if password:
-        cmd = f"nmcli dev wifi connect {shlex.quote(ssid)} password {shlex.quote(password)}"
-    else:
-        cmd = f"nmcli dev wifi connect {shlex.quote(ssid)}"
-    return nm(cmd)
+    from . import nm_wifi
+    return nm_wifi.connect(ssid, password)
 
 def wifi_forget(ssid):
-    out = nm('nmcli -t -f UUID,NAME con show')
-    uuid = None
-    for line in out.splitlines():
-        if ':' in line:
-            u, name = line.split(':', 1)
-            if name == ssid:
-                uuid = u
-                break
-    if uuid:
-        return nm(f'nmcli con delete {uuid}')
-    return 'No connection found'
+    from . import nm_wifi
+    return nm_wifi.forget(ssid)
 
 def wifi_set_autopref(ssid, auto, priority):
-    out = nm('nmcli -t -f UUID,NAME con show')
-    uuid = None
-    for line in out.splitlines():
-        if ':' in line:
-            u, name = line.split(':', 1)
-            if name == ssid:
-                uuid = u
-                break
-    if not uuid:
-        return 'No connection found to modify'
-    auto_val = 'yes' if auto else 'no'
-    out1 = nm(f'nmcli con modify {uuid} connection.autoconnect {auto_val}')
-    out2 = nm(f'nmcli con modify {uuid} connection.autoconnect-priority {priority}')
-    return (out1 or '') + '\n' + (out2 or '')
+    from . import nm_wifi
+    return nm_wifi.set_autopref(ssid, auto, priority)
 
 # BT Helpers
 def bt_load_config():
