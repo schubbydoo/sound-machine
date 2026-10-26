@@ -1,279 +1,221 @@
 {% extends "propkit/base.html" %}
-{% block title %}Memory Spark Station{% endblock %}
+{% block title %}Tracks - Memory Spark Station{% endblock %}
 {% block head_extra %}
 <script defer src="https://use.fontawesome.com/releases/v5.15.4/js/all.js"></script>
 <style>
-    .audio-row { align-items: center; }
-    .is-clickable { cursor: pointer; }
-    .channel-badge { margin-left: 0.5rem; }
-    /* Inline edit styles */
-    .inline-edit-input {
-      font-size: 0.75rem;
-      padding: 0.25rem 0.5rem;
-      border: 1px solid #dbdbdb;
-      border-radius: 4px;
-      background: #fafafa;
-      width: 100%;
-      margin-bottom: 0.25rem;
+    /* Page layout. Colours and fonts come from propkit's style.css. */
+    .tm-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+    .tm-head .title { margin: 0; }
+    .tm-toolbar { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+    .tm-toolbar .tm-grow { flex: 1 1 260px; min-width: 0; }
+    .tm-toolbar .tm-fixed { flex: 0 1 190px; min-width: 150px; }
+    .tm-toolbar .field { margin-bottom: 0; }
+    .tm-desc { margin-top: 14px; padding: 10px 14px; border-left: 3px solid var(--accent3); background: rgba(77,141,255,.07); font-size: 14px; line-height: 1.5; display: none; }
+    .tm-desc strong { color: var(--muted); font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; margin-right: 6px; }
+    .tm-filepick { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .tm-filepick input[type=file] { display: none; }
+    .tm-filename { color: var(--muted); font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* Button assignments */
+    .tm-table { min-width: 0 !important; table-layout: fixed; }
+    .tm-table th:nth-child(1) { width: 44px; } .tm-table th:nth-child(4) { width: 150px; }
+    .tm-table td.tm-num { font-family: 'JetBrains Mono', monospace; color: var(--accent); font-weight: 700; }
+    .tm-meta { font-size: 13px; line-height: 1.45; color: var(--text); word-break: break-word; }
+    .tm-meta .k { color: var(--muted); font-family: 'JetBrains Mono', monospace; font-size: 10.5px; letter-spacing: 1px; text-transform: uppercase; margin-right: 6px; }
+    .tm-meta .none { color: var(--muted); }
+    .tm-actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; }
+    .tm-actions .button { padding: 7px 11px; box-shadow: 3px 3px 0 currentColor; }
+    .tm-edit-line { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .tm-edit-line .k { color: var(--muted); font-family: 'JetBrains Mono', monospace; font-size: 10.5px; letter-spacing: 1px; text-transform: uppercase; width: 38px; flex: none; }
+    .tm-edit-line .input { padding: 6px 10px; font-size: 13px; }
+    .view-mode { display: block; } .edit-mode { display: none; }
+    tr.is-editing .view-mode { display: none; } tr.is-editing .edit-mode { display: block; }
+    tr.is-editing .tm-actions .view-mode { display: none; } tr.is-editing .tm-actions .edit-mode { display: flex; gap: 8px; }
+    @media (max-width: 640px) {
+        .tm-table thead { display: none; }
+        .tm-table, .tm-table tbody { display: block; }
+        .tm-table tr { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "n x" "a a" "m m";
+                       gap: 8px 10px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line); }
+        .tm-table td { display: block; padding: 0; border: 0; }
+        .tm-table td.tm-num { grid-area: n; } .tm-table td.tm-sel { grid-area: a; min-width: 0; }
+        .tm-table td.tm-info { grid-area: m; } .tm-table td.tm-act { grid-area: x; }
+        .tm-actions .button { padding: 7px 9px; }
+        .tm-toolbar .tm-fixed { flex: 1 1 140px; }
     }
-    .inline-edit-input:focus {
-      border-color: #3273dc;
-      outline: none;
-      background: #fff;
-    }
-    .view-mode, .edit-mode { display: block; }
-    .edit-mode { display: none; }
-    tr.is-editing .view-mode { display: none; }
-    tr.is-editing .edit-mode { display: block; }
-  </style>
+
+    /* Modals (propkit has none) */
+    .modal { display: none; position: fixed; inset: 0; z-index: 300; align-items: center; justify-content: center; padding: 16px; }
+    .modal.is-active { display: flex; }
+    .modal-background { position: absolute; inset: 0; background: rgba(0,0,0,.72); }
+    .modal-card { position: relative; width: min(560px, 100%); max-height: calc(100vh - 32px); display: flex; flex-direction: column;
+                  background: var(--panel); border: 2px solid var(--line); border-radius: var(--radius); box-shadow: 7px 7px 0 var(--line); }
+    .modal-card.is-wide { width: min(820px, 100%); }
+    .modal-card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 18px 22px 0; }
+    .modal-card-title { font-size: 18px; font-weight: 700; margin: 0; }
+    .modal-card-head .delete { background: none; border: 0; color: var(--muted); font-size: 26px; line-height: 1; cursor: pointer; padding: 0 4px; }
+    .modal-card-head .delete::before { content: "\00d7"; } .modal-card-head .delete:hover { color: var(--text); }
+    .modal-card-body { padding: 16px 22px; overflow-y: auto; }
+    .modal-card-foot { display: flex; gap: 12px; padding: 0 22px 20px; flex-wrap: wrap; }
+    .tm-files-tools { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+    .tm-files-tools .input { flex: 1 1 200px; }
+    .tm-files-list { max-height: 52vh; overflow: auto; }
+    .tm-files-list .table { min-width: 0 !important; }
+    .tm-files-list .path { color: var(--muted); font-size: 11.5px; word-break: break-all; }
+</style>
 {% endblock %}
 {% block content %}
 
-<section class="section">
-  <div class="container">
-    
-    <!-- Profile Management -->
-    <div class="box">
-        <h2 class="title is-4">Track Management</h2>
-        
-        <!-- Row 1: Profile Selection and Assignment -->
-        <div class="level mb-2">
-            <div class="level-left">
-                <div class="level-item">
-                    <div class="field has-addons">
-                        <div class="control">
-                            <div class="select">
-                                <select id="profileSelect" onchange="switchProfile(this.value)">
-                                    {% for p in profiles %}
-                                    <option value="{{ p.id }}" {% if p.id == active_profile_id %}selected{% endif %}>
-                                        {{ p.name }}
-                                    </option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                        </div>
-                        <div class="control">
-                            <button class="button" onclick="renameProfile()">
-                                <span class="icon is-small"><i class="fas fa-edit"></i></span>
-                            </button>
-                        </div>
-                        <div class="control">
-                            <button class="button is-danger is-light" onclick="deleteProfile()">
-                                <span class="icon is-small"><i class="fas fa-trash"></i></span>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                <div class="level-item">
-                    <button class="button is-success is-light" onclick="createProfile()">
-                        <span class="icon"><i class="fas fa-plus"></i></span>
-                        <span>New Track</span>
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Row 2: Description and Printing -->
-        <div class="level">
-            <div class="level-left">
-                <div class="level-item">
-                     <button class="button is-warning is-light" onclick="openInstructionsModal()">
-                        <span class="icon"><i class="fas fa-align-left"></i></span>
-                        <span>Description</span>
-                    </button>
-                </div>
-            </div>
-            <div class="level-right">
-                <div class="level-item">
-                    <div class="dropdown is-hoverable is-right">
-                        <div class="dropdown-trigger">
-                            <button class="button is-info" aria-haspopup="true" aria-controls="dropdown-menu">
-                                <span class="icon"><i class="fas fa-print"></i></span>
-                                <span>Print</span>
-                                <span class="icon is-small"><i class="fas fa-angle-down"></i></span>
-                            </button>
-                        </div>
-                        <div class="dropdown-menu" id="dropdown-menu" role="menu">
-                            <div class="dropdown-content">
-                                <a href="/print_key/{{ active_profile_id }}" target="_blank" class="dropdown-item">
-                                    Answer Key
-                                </a>
-                                <hr class="dropdown-divider">
-                                <a href="/print_worksheet/{{ active_profile_id }}" target="_blank" class="dropdown-item">
-                                    Worksheet
-                                </a>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="level-item">
-                    <a class="button is-primary is-light" href="/print_tracks" target="_blank" title="Print Track Assignments Label">
-                        <span class="icon"><i class="fas fa-tags"></i></span>
-                        <span>Print Tracks</span>
-                    </a>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Row 3: Description Display -->
-        <div id="descriptionDisplay" class="message is-small is-info is-light mt-3" style="display: none;">
-            <div class="message-body">
-                <strong>Description:</strong> <span id="descText"></span>
-            </div>
-        </div>
+<!-- Track (profile) picker and actions -->
+<div class="box">
+    <div class="tm-head">
+        <h2 class="title is-4">Track</h2>
+        <button class="button is-success is-small" onclick="createProfile()"><i class="fas fa-plus"></i>&nbsp; New Track</button>
     </div>
-
-    <!-- Bulk Upload -->
-    <div class="box">
-        <div class="level mb-2">
-            <div class="level-left">
-                <h2 class="title is-4">Upload Audio</h2>
-            </div>
-            <div class="level-right">
-                <button class="button is-danger is-light is-small" onclick="openFilesModal()">
-                    <span class="icon"><i class="fas fa-trash"></i></span>
-                    <span>Manage Files</span>
-                </button>
-            </div>
-        </div>
-        <form id="uploadForm" onsubmit="return uploadFiles(event)">
-            <input type="hidden" name="profile_id" value="{{ active_profile_id }}">
-            <div class="field is-horizontal">
-                <div class="field-body">
-                    <div class="field">
-                        <div class="file has-name is-fullwidth">
-                            <label class="file-label">
-                                <input class="file-input" type="file" name="file" multiple accept=".wav" id="fileInput">
-                                <span class="file-cta">
-                                    <span class="file-icon"><i class="fas fa-upload"></i></span>
-                                    <span class="file-label">Choose files...</span>
-                                </span>
-                                <span class="file-name" id="fileName">No file chosen</span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="field has-addons">
-                        <div class="control">
-                            <a class="button is-static">Auto-Assign from Button</a>
-                        </div>
-                        <div class="control">
-                            <input class="input" type="number" name="auto_assign_start" min="1" max="16" placeholder="Optional">
-                        </div>
-                        <div class="control">
-                            <button class="button is-primary" type="submit">Upload</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </form>
-    </div>
-
-    <!-- Button Mappings -->
-    <div class="box">
-        <h2 class="title is-4">Button Assignments</h2>
-        <div class="table-container">
-            <table class="table is-fullwidth is-striped is-hoverable">
-                <thead>
-                    <tr>
-                        <th width="50">#</th>
-                        <th>Assigned Audio</th>
-                        <th>Description / Hint</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for i in range(1, 17) %}
-                    {% set m = mappings.get(i) %}
-                    <tr id="row-{{ i }}" data-audio-id="{{ m.audio_id if m else '' }}" data-category="{{ m.category or '' if m else '' }}">
-                        <td class="is-vcentered"><strong>{{ i }}</strong></td>
-                        <td class="is-vcentered">
-                            <div class="select is-fullwidth">
-                                <select onchange="assignButton({{ i }}, this.value)">
-                                    <option value="">— Unassigned —</option>
-                                    {% for f in all_files %}
-                                    <option value="{{ f.id }}" {% if m and m.audio_id == f.id %}selected{% endif %}>
-                                        {{ f.filename }}
-                                    </option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                        </td>
-                        <td class="is-vcentered">
-                            {% if m %}
-                                <div class="view-mode">
-                                    <div><small><strong>Desc:</strong> {{ m.description or '-' }}</small></div>
-                                    {% if m.hint %}<div><small><strong>Hint:</strong> {{ m.hint }}</small></div>{% endif %}
-                                </div>
-                                <div class="edit-mode">
-                                    <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.25rem;"><small><strong>Desc:</strong></small> <input type="text" class="inline-edit-input" id="edit-desc-{{ i }}" value="{{ m.description or '' }}" placeholder="Description" style="flex:1; margin-bottom:0;"></div>
-                                    <div style="display:flex; align-items:center; gap:0.5rem;"><small><strong>Hint:</strong></small> <input type="text" class="inline-edit-input" id="edit-hint-{{ i }}" value="{{ m.hint or '' }}" placeholder="Hint" style="flex:1; margin-bottom:0;"></div>
-                                </div>
-                            {% else %}
-                                <span class="has-text-grey-light">-</span>
-                            {% endif %}
-                        </td>
-                        <td class="is-vcentered">
-                            <div class="buttons are-small">
-                                <button class="button is-info is-light" onclick="play({{ i }})" title="Play">
-                                    <span class="icon"><i class="fas fa-play"></i></span>
-                                </button>
-                                {% if m %}
-                                <div class="view-mode" style="display: inline-block;">
-                                    <button class="button is-warning is-light" onclick="startInlineEdit({{ i }})" title="Edit Description & Hint">
-                                        <span class="icon"><i class="fas fa-pencil-alt"></i></span>
-                                    </button>
-                                </div>
-                                <div class="edit-mode">
-                                    <button class="button is-success is-light" onclick="saveInlineEdit({{ i }})" title="Save">
-                                        <span class="icon"><i class="fas fa-check"></i></span>
-                                    </button>
-                                    <button class="button is-danger is-light" onclick="cancelInlineEdit({{ i }})" title="Cancel">
-                                        <span class="icon"><i class="fas fa-times"></i></span>
-                                    </button>
-                                </div>
-                                {% endif %}
-                            </div>
-                        </td>
-                    </tr>
+    <div class="tm-toolbar">
+        <div class="field tm-grow">
+            <label class="label" for="profileSelect">Selected track</label>
+            <div class="select is-fullwidth">
+                <select id="profileSelect" onchange="switchProfile(this.value)">
+                    {% for p in profiles %}
+                    <option value="{{ p.id }}" {% if p.id == active_profile_id %}selected{% endif %}>{{ p.name }}</option>
                     {% endfor %}
-                </tbody>
-            </table>
+                </select>
+            </div>
+        </div>
+        <div class="field tm-fixed">
+            <label class="label" for="trackActions">Edit</label>
+            <div class="select is-fullwidth">
+                <select id="trackActions" onchange="trackAction(this)">
+                    <option value="">Choose…</option>
+                    <option value="describe">Edit description</option>
+                    <option value="rename">Rename track</option>
+                    <option value="delete">Delete track</option>
+                </select>
+            </div>
+        </div>
+        <div class="field tm-fixed">
+            <label class="label" for="printActions">Print</label>
+            <div class="select is-fullwidth">
+                <select id="printActions" onchange="printAction(this)">
+                    <option value="">Choose…</option>
+                    <option value="/print_key/{{ active_profile_id }}">Answer key</option>
+                    <option value="/print_worksheet/{{ active_profile_id }}">Worksheet</option>
+                    <option value="/print_tracks">Track labels</option>
+                </select>
+            </div>
         </div>
     </div>
+    <div id="descriptionDisplay" class="tm-desc"><strong>Description</strong><span id="descText"></span></div>
+</div>
 
-  </div>
-</section>
+<!-- Upload -->
+<div class="box">
+    <div class="tm-head">
+        <h2 class="title is-4">Upload audio</h2>
+        <button class="button is-danger is-light is-small" onclick="openFilesModal()"><i class="fas fa-trash"></i>&nbsp; Manage files</button>
+    </div>
+    <form id="uploadForm" onsubmit="return uploadFiles(event)">
+        <input type="hidden" name="profile_id" value="{{ active_profile_id }}">
+        <div class="tm-toolbar">
+            <div class="field tm-grow">
+                <span class="label">WAV files</span>
+                <div class="tm-filepick">
+                    <label class="button is-info is-small" for="fileInput"><i class="fas fa-upload"></i>&nbsp; Choose files</label>
+                    <input type="file" name="file" multiple accept=".wav" id="fileInput">
+                    <span class="tm-filename" id="fileName">No file chosen</span>
+                </div>
+            </div>
+            <div class="field tm-fixed">
+                <label class="label" for="autoAssign">Auto-assign</label>
+                <div class="select is-fullwidth">
+                    <select id="autoAssign" name="auto_assign_start">
+                        <option value="">Don't assign</option>
+                        {% for i in range(1, 17) %}<option value="{{ i }}">Starting at button {{ i }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="field">
+                <button class="button is-primary" type="submit">Upload</button>
+            </div>
+        </div>
+    </form>
+</div>
+
+<!-- Button mappings -->
+<div class="box">
+    <h2 class="title is-4">Button assignments</h2>
+    <div class="table-container">
+        <table class="table tm-table">
+            <thead>
+                <tr><th>#</th><th>Assigned audio</th><th>Description / hint</th><th></th></tr>
+            </thead>
+            <tbody>
+                {% for i in range(1, 17) %}
+                {% set m = mappings.get(i) %}
+                <tr id="row-{{ i }}" data-audio-id="{{ m.audio_id if m else '' }}" data-category="{{ m.category or '' if m else '' }}">
+                    <td class="tm-num">{{ i }}</td>
+                    <td class="tm-sel">
+                        <div class="select is-fullwidth">
+                            <select onchange="assignButton({{ i }}, this.value)" aria-label="Audio for button {{ i }}">
+                                <option value="">— Unassigned —</option>
+                                {% for f in all_files %}
+                                <option value="{{ f.id }}" {% if m and m.audio_id == f.id %}selected{% endif %}>{{ f.filename }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </td>
+                    <td class="tm-info">
+                        {% if m %}
+                        <div class="view-mode tm-meta">
+                            <div><span class="k">Desc</span>{{ m.description or '-' }}</div>
+                            {% if m.hint %}<div><span class="k">Hint</span>{{ m.hint }}</div>{% endif %}
+                        </div>
+                        <div class="edit-mode">
+                            <div class="tm-edit-line"><span class="k">Desc</span><input type="text" class="input" id="edit-desc-{{ i }}" value="{{ m.description or '' }}" placeholder="Description"></div>
+                            <div class="tm-edit-line"><span class="k">Hint</span><input type="text" class="input" id="edit-hint-{{ i }}" value="{{ m.hint or '' }}" placeholder="Hint"></div>
+                        </div>
+                        {% else %}
+                        <span class="tm-meta none">-</span>
+                        {% endif %}
+                    </td>
+                    <td class="tm-act">
+                        <div class="tm-actions">
+                            <button class="button is-info is-light" onclick="play({{ i }})" title="Play"><i class="fas fa-play"></i></button>
+                            {% if m %}
+                            <span class="view-mode"><button class="button is-warning is-light" onclick="startInlineEdit({{ i }})" title="Edit description and hint"><i class="fas fa-pencil-alt"></i></button></span>
+                            <span class="edit-mode">
+                                <button class="button is-success is-light" onclick="saveInlineEdit({{ i }})" title="Save"><i class="fas fa-check"></i></button>
+                                <button class="button is-danger is-light" onclick="cancelInlineEdit({{ i }})" title="Cancel"><i class="fas fa-times"></i></button>
+                            </span>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
 
 <!-- Metadata Modal -->
 <div class="modal" id="metaModal">
   <div class="modal-background" onclick="closeModal()"></div>
   <div class="modal-card">
     <header class="modal-card-head">
-      <p class="modal-card-title">Edit Metadata</p>
+      <p class="modal-card-title">Edit metadata</p>
       <button class="delete" aria-label="close" onclick="closeModal()"></button>
     </header>
     <section class="modal-card-body">
       <input type="hidden" id="metaId">
-      <div class="field">
-          <label class="label">Filename</label>
-          <div class="control"><input class="input" type="text" id="metaFilename" readonly></div>
-      </div>
-      <div class="field">
-          <label class="label">Description (Source)</label>
-          <div class="control"><input class="input" type="text" id="metaDesc" placeholder="e.g. Jurassic Park T-Rex"></div>
-      </div>
-      <div class="field">
-          <label class="label">Category</label>
-          <div class="control"><input class="input" type="text" id="metaCat" placeholder="e.g. Sci-Fi"></div>
-      </div>
-      <div class="field">
-          <label class="label">Hint</label>
-          <div class="control"><input class="input" type="text" id="metaHint" placeholder="e.g. Big Dinosaur"></div>
-      </div>
+      <div class="field"><label class="label">Filename</label><input class="input" type="text" id="metaFilename" readonly></div>
+      <div class="field"><label class="label">Description (source)</label><input class="input" type="text" id="metaDesc" placeholder="e.g. Jurassic Park T-Rex"></div>
+      <div class="field"><label class="label">Category</label><input class="input" type="text" id="metaCat" placeholder="e.g. Sci-Fi"></div>
+      <div class="field"><label class="label">Hint</label><input class="input" type="text" id="metaHint" placeholder="e.g. Big Dinosaur"></div>
     </section>
     <footer class="modal-card-foot">
       <button class="button is-success" onclick="saveMetadata()">Save changes</button>
-      <button class="button" onclick="closeModal()">Cancel</button>
+      <button class="button is-light" onclick="closeModal()">Cancel</button>
     </footer>
   </div>
 </div>
@@ -283,21 +225,19 @@
   <div class="modal-background" onclick="closeInstrModal()"></div>
   <div class="modal-card">
     <header class="modal-card-head">
-      <p class="modal-card-title">Profile Instructions</p>
+      <p class="modal-card-title">Track description</p>
       <button class="delete" aria-label="close" onclick="closeInstrModal()"></button>
     </header>
     <section class="modal-card-body">
       <div class="field">
-          <label class="label">Instructions / Description</label>
-          <div class="control">
-              <textarea class="textarea" id="profileInstr" placeholder="e.g. Name the song and artist..."></textarea>
-          </div>
-          <p class="help">These instructions will appear on the printed worksheet.</p>
+          <label class="label" for="profileInstr">Instructions / description</label>
+          <textarea class="textarea" id="profileInstr" placeholder="e.g. Name the song and artist..."></textarea>
+          <p class="help">These instructions appear on the printed worksheet.</p>
       </div>
     </section>
     <footer class="modal-card-foot">
       <button class="button is-success" onclick="saveInstructions()">Save</button>
-      <button class="button" onclick="closeInstrModal()">Cancel</button>
+      <button class="button is-light" onclick="closeInstrModal()">Cancel</button>
     </footer>
   </div>
 </div>
@@ -305,38 +245,30 @@
 <!-- File Management Modal -->
 <div class="modal" id="filesModal">
   <div class="modal-background" onclick="closeFilesModal()"></div>
-  <div class="modal-card" style="width: 800px; max-width: 95%;">
+  <div class="modal-card is-wide">
     <header class="modal-card-head">
-      <p class="modal-card-title">Manage Audio Files</p>
+      <p class="modal-card-title">Manage audio files</p>
       <button class="delete" aria-label="close" onclick="closeFilesModal()"></button>
     </header>
     <section class="modal-card-body">
-      <div class="level">
-          <div class="level-left">
-              <p>Select files to delete permanently.</p>
-          </div>
-          <div class="level-right">
-              <button class="button is-danger" onclick="deleteSelectedFiles()" id="deleteBtn" disabled>
-                  <span class="icon"><i class="fas fa-trash"></i></span>
-                  <span>Delete Selected</span>
-              </button>
-          </div>
+      <div class="tm-files-tools">
+          <input class="input" type="search" id="fileFilter" placeholder="Filter files…" oninput="filterFiles(this.value)">
+          <button class="button is-danger" onclick="deleteSelectedFiles()" id="deleteBtn" disabled>Delete selected</button>
       </div>
-      <div class="table-container" style="max-height: 60vh; overflow-y: auto;">
-          <table class="table is-fullwidth is-striped is-hoverable is-narrow">
+      <p class="help" style="margin-bottom:10px">Tick files to delete them permanently.</p>
+      <div class="tm-files-list">
+          <table class="table is-narrow">
             <thead>
                 <tr>
-                    <th width="40"><input type="checkbox" onchange="toggleAllFiles(this)"></th>
+                    <th style="width:40px"><input type="checkbox" onchange="toggleAllFiles(this)" aria-label="Select all shown"></th>
                     <th>Filename</th>
-                    <th>Path</th>
                 </tr>
             </thead>
             <tbody>
                 {% for f in all_files %}
-                <tr>
+                <tr class="file-row">
                     <td><input type="checkbox" class="file-check" value="{{ f.id }}" onchange="updateDeleteBtn()"></td>
-                    <td>{{ f.filename }}</td>
-                    <td class="is-size-7">{{ f.filepath }}</td>
+                    <td><span class="file-name-text">{{ f.filename }}</span><div class="path">{{ f.filepath }}</div></td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -352,18 +284,30 @@ document.addEventListener('DOMContentLoaded', () => {
     const fileInput = document.querySelector('#fileInput');
     if (fileInput) {
         fileInput.onchange = () => {
-            if (fileInput.files.length > 0) {
-                const fileNameEl = document.querySelector('#fileName');
-                if (fileNameEl) {
-                    fileNameEl.textContent = fileInput.files.length + ' files selected';
-                }
-            }
+            const fileNameEl = document.querySelector('#fileName');
+            const n = fileInput.files.length;
+            if (fileNameEl) fileNameEl.textContent = n === 0 ? 'No file chosen' : (n === 1 ? fileInput.files[0].name : n + ' files selected');
         };
     }
 });
 
 function switchProfile(id) {
     window.location.href = '/?profile_id=' + id;
+}
+
+// "Edit" and "Print" dropdowns: act on the choice, then reset to the placeholder
+function trackAction(sel) {
+    const v = sel.value;
+    sel.value = '';
+    if (v === 'describe') openInstructionsModal();
+    else if (v === 'rename') renameProfile();
+    else if (v === 'delete') deleteProfile();
+}
+
+function printAction(sel) {
+    const url = sel.value;
+    sel.value = '';
+    if (url) window.open(url, '_blank');
 }
 
 async function createProfile() {
@@ -429,7 +373,7 @@ async function saveInstructions() {
     const fd = new FormData();
     fd.append('id', '{{ active_profile_id }}');
     fd.append('instructions', instr);
-    
+
     const res = await fetch('/api/profile/update_instructions', {method: 'POST', body: fd});
     if (res.ok) location.reload();
     else alert('Error saving instructions');
@@ -442,7 +386,7 @@ async function uploadFiles(ev) {
     const fd = new FormData(form);
     const btn = form.querySelector('button[type="submit"]');
     btn.classList.add('is-loading');
-    
+
     try {
         const res = await fetch('/upload', {method: 'POST', body: fd});
         const js = await res.json();
@@ -460,7 +404,7 @@ async function assignButton(btnId, audioId) {
     fd.append('profile_id', '{{ active_profile_id }}');
     fd.append('button_id', btnId);
     fd.append('audio_id', audioId);
-    
+
     // Optimistic UI update could happen here, but reload is safer for sync
     const res = await fetch('/api/assign', {method: 'POST', body: fd});
     const js = await res.json();
@@ -469,31 +413,23 @@ async function assignButton(btnId, audioId) {
 }
 
 async function play(btnId) {
-    console.log('Play button clicked:', btnId);
     try {
         // Get the active profile ID from the select dropdown (in case user switched profiles)
         const profileSelect = document.getElementById('profileSelect');
         const profileId = profileSelect ? profileSelect.value : '{{ active_profile_id }}';
-        console.log('Using profile_id:', profileId);
-        
+
         if (!profileId) {
             alert('No profile selected. Please select a profile first.');
             return;
         }
-        
+
         // Pass active profile so we test what we see
-        const url = `/play/${btnId}?profile_id=${profileId}`;
-        console.log('Fetching URL:', url);
-        const response = await fetch(url, {method: 'POST'});
-        console.log('Response status:', response.status);
+        const response = await fetch(`/play/${btnId}?profile_id=${profileId}`, {method: 'POST'});
         const result = await response.json();
-        console.log('Response result:', result);
-        
+
         if (!result.ok) {
             alert(`Error playing button ${btnId}: ${result.error || 'Unknown error'}`);
             console.error('Play error:', result);
-        } else {
-            console.log('Play successful:', result.filename);
         }
     } catch(e) {
         alert(`Failed to play button ${btnId}: ${e.message}`);
@@ -552,14 +488,16 @@ function cancelInlineEdit(rowNum) {
     delete inlineEditOriginal[rowNum];
 }
 
+function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+}
+
 async function saveInlineEdit(rowNum) {
     const row = document.getElementById('row-' + rowNum);
     const audioId = row.dataset.audioId;
     const category = row.dataset.category;
     const desc = document.getElementById('edit-desc-' + rowNum).value;
     const hint = document.getElementById('edit-hint-' + rowNum).value;
-
-    console.log('Saving inline edit:', {rowNum, audioId, category, desc, hint});
 
     if (!audioId) {
         alert('Error: No audio ID found for this row');
@@ -575,13 +513,12 @@ async function saveInlineEdit(rowNum) {
     try {
         const res = await fetch('/api/metadata/update', {method: 'POST', body: fd});
         const result = await res.json();
-        console.log('Save response:', result);
         if (res.ok && result.ok) {
             // Update the view mode display
-            const viewMode = row.querySelector('td:nth-child(3) .view-mode');
-            let html = '<div><small><strong>Desc:</strong> ' + (desc || '-') + '</small></div>';
+            const viewMode = row.querySelector('td.tm-info .view-mode');
+            let html = '<div><span class="k">Desc</span>' + escapeHtml(desc || '-') + '</div>';
             if (hint) {
-                html += '<div><small><strong>Hint:</strong> ' + hint + '</small></div>';
+                html += '<div><span class="k">Hint</span>' + escapeHtml(hint) + '</div>';
             }
             viewMode.innerHTML = html;
             row.classList.remove('is-editing');
@@ -603,11 +540,19 @@ function closeFilesModal() {
     document.getElementById('filesModal').classList.remove('is-active');
 }
 
+function filterFiles(q) {
+    q = q.trim().toLowerCase();
+    document.querySelectorAll('#filesModal .file-row').forEach(tr => {
+        const name = tr.querySelector('.file-name-text').textContent.toLowerCase();
+        tr.style.display = !q || name.includes(q) ? '' : 'none';
+    });
+}
+
 function toggleAllFiles(source) {
-    const checkboxes = document.querySelectorAll('.file-check');
-    for(let i=0; i<checkboxes.length; i++) {
-        checkboxes[i].checked = source.checked;
-    }
+    // Only the rows currently shown by the filter
+    document.querySelectorAll('#filesModal .file-row').forEach(tr => {
+        if (tr.style.display !== 'none') tr.querySelector('.file-check').checked = source.checked;
+    });
     updateDeleteBtn();
 }
 
@@ -616,25 +561,25 @@ function updateDeleteBtn() {
     const btn = document.getElementById('deleteBtn');
     if (checkboxes.length > 0) {
         btn.removeAttribute('disabled');
-        btn.innerText = `Delete Selected (${checkboxes.length})`;
+        btn.innerText = `Delete selected (${checkboxes.length})`;
     } else {
         btn.setAttribute('disabled', 'true');
-        btn.innerText = 'Delete Selected';
+        btn.innerText = 'Delete selected';
     }
 }
 
 async function deleteSelectedFiles() {
     const checkboxes = document.querySelectorAll('.file-check:checked');
     if (checkboxes.length === 0) return;
-    
+
     if (!confirm(`Are you sure you want to delete ${checkboxes.length} files? This cannot be undone.`)) return;
-    
+
     const ids = [];
     checkboxes.forEach((cb) => ids.push(cb.value));
-    
+
     const btn = document.getElementById('deleteBtn');
     btn.classList.add('is-loading');
-    
+
     try {
         const res = await fetch('/api/audio/delete', {
             method: 'POST',
