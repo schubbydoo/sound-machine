@@ -14,6 +14,7 @@ import shlex
 import time
 import hashlib
 import zipfile
+from collections import Counter
 from pathlib import Path
 from flask import Flask, render_template, request, jsonify, send_file, Response, redirect
 
@@ -30,6 +31,7 @@ for _name, _env in (("netguard", "NETGUARD_DIR"), ("propkit", "PROPKIT_DIR")):
         sys.path.insert(0, _dir)
 import propkit
 from propkit import flask_app as propkit_flask
+from propkit import stats as pkstats
 
 from . import network_utils as nu
 from .storage import get_storage_adapter, get_trackpack_updated_at as storage_get_updated_at
@@ -359,6 +361,7 @@ def upload_file():
             if tmp_path.exists(): tmp_path.unlink()
     conn.commit()
     conn.close()
+    library_rec.record('upload', 'ok' if saved_ids else 'error', detail='%d file(s)' % len(saved_ids), files=len(saved_ids))
     return jsonify({'ok': True, 'count': len(saved_ids)})
 
 @app.route('/api/metadata/update', methods=['POST'])
@@ -877,11 +880,62 @@ def api_server_info():
 BASE_DIR = Path(__file__).resolve().parent.parent.parent       # the git checkout
 STATE_DIR = BASE_DIR / "log" / "netguard"                      # written by netguard-monitor.service
 
+# Activity events (propkit.stats). Plays are recorded by daemon/play_events.py (a sidecar that reads the soundtrigger log);
+# cloud pulls ("sync") and uploads are recorded beside them; count_kinds keeps them out of the Dashboard's play tiles.
+ACTIVITY_DIR = BASE_DIR / "log" / "activity"
+library_rec = pkstats.Recorder(str(ACTIVITY_DIR))
+
+
+def _by_track_card(events):
+    c = Counter(e.get("detail") for e in events if e["kind"] == "play" and e["outcome"] == "ok" and e.get("detail"))
+    return {"title": "By track", "kind": "bars", "rows": [[k, n] for k, n in c.most_common(10)], "note": "most played"}
+
+
+def _library_card():
+    """Library facts (state, not events): what is on the station and when the cloud was last pulled."""
+    rows = []
+    try:
+        conn = get_db()
+        try:
+            rows.append(["Tracks", str(conn.execute("SELECT COUNT(*) FROM profiles").fetchone()[0])])
+            rows.append(["Audio files", str(conn.execute("SELECT COUNT(*) FROM audio_files").fetchone()[0])])
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    ok = [e for e in pkstats.read_events(str(ACTIVITY_DIR), kinds=["sync"]) if e["outcome"] == "ok"]
+    rows.append(["Cloud pulls", str(len(ok))])
+    rows.append(["Last pull", ok[-1]["ts"].replace("T", " ")[:16] if ok else "none yet"])
+    return [{"title": "Library", "kind": "facts", "rows": rows}]
+
+
+def _prop_banner():
+    """Warn when the newest cloud pulls all failed (the kiosk's download button would then not work)."""
+    try:
+        recent = pkstats.read_events(str(ACTIVITY_DIR), kinds=["sync"], limit=3)
+        if len(recent) >= 3 and all(e["outcome"] == "error" for e in recent):
+            return {"tone": "warn", "text": "The last 3 cloud track pulls failed (%s). Check the network on the System tab." % (recent[-1].get("detail") or "see the log")}
+    except Exception:
+        pass
+    return None
+
+
 propkit_cfg = propkit.PropConfig(
     name="Memory Spark Station", brand=("MEMORY", "SPARK"),
-    tabs=[("tracks", "/", "Tracks"), ("bluetooth", "/bt", "Bluetooth"), ("system", "/system", "System")],
+    tabs=[("dashboard", "/dashboard", "Dashboard"), ("tracks", "/", "Tracks"), ("bluetooth", "/bt", "Bluetooth"),
+          ("system", "/system", "System")],
     service_name="webui.service", base_dir=str(BASE_DIR), state_dir=str(STATE_DIR),
     hotspot_profile="PropManager-AP",
+    events_dir=str(ACTIVITY_DIR),
+    stats=pkstats.StatsSpec(
+        noun="play", noun_plural="plays", count_kinds=("play",),
+        outcomes={"ok": ("Played", "good"), "error": ("Failed to start", "bad")},
+        labels={"visits": ("Plays", "button presses that played a sound"), "rate": ("Played OK", "of plays that started"),
+                "gap": ("Between plays", "in busy periods"), "outcomes_title": ("How each play went", "")},
+        extra_cards=[pkstats.by_field_card("button", "By button", {i: "Button %d" % i for i in range(1, 17)}),
+                     _by_track_card],
+        state_cards=_library_card),
+    banner=_prop_banner,
     # One shared login for the whole web admin once a password is set at /setup (open until then).
     # Discovery stays public so the phone app can still identify the station.
     login=True, login_public_paths=("/api/server-info",))

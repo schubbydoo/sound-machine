@@ -7,6 +7,7 @@ Zero modifications to existing sound-machine services.
 """
 import io
 import json
+import os
 import re
 import sqlite3
 import ssl
@@ -27,6 +28,23 @@ except ImportError:
 DB_PATH    = Path('/home/soundconsole/sound-machine/data/sound_machine.db')
 SOUNDS_DIR = Path('/home/soundconsole/sound-machine/Sounds/uploads')
 CLOUD_URL  = 'https://api.memorysparkplay.fun'
+
+# Cloud pulls are recorded as activity events for the shared Dashboard (propkit, cloned at ~/propkit).
+# Recording never raises; if propkit is missing the kiosk simply runs without it.
+try:
+    _pk = os.environ.get('PROPKIT_DIR', str(Path.home() / 'propkit'))
+    if Path(_pk).is_dir() and _pk not in sys.path:
+        sys.path.insert(0, _pk)
+    from propkit.stats import Recorder
+    _library_rec = Recorder('/home/soundconsole/sound-machine/log/activity')
+except Exception:
+    _library_rec = None
+
+
+def _record_sync(outcome, pack, started, **extra):
+    if _library_rec:
+        _library_rec.record('sync', outcome, seconds=time.time() - started, detail=pack, **extra)
+
 
 app = Flask(__name__)
 
@@ -454,6 +472,7 @@ def api_library_download(stable_id):
     if not m:
         return jsonify({'ok': False, 'error': 'Invalid stable_id'}), 400
     cloud_id = m.group(1)
+    started = time.time()
 
     try:
         ctx = ssl.create_default_context()
@@ -544,9 +563,11 @@ def api_library_download(stable_id):
             finally:
                 conn.close()
 
+        _record_sync('ok', track['name'], started, tracks_added=len(buttons))
         return jsonify({'ok': True, 'profile_id': profile_id, 'name': track['name']})
 
     except Exception as e:
+        _record_sync('error', stable_id, started, error=str(e)[:120])
         return jsonify({'ok': False, 'error': str(e)}), 500
 
 

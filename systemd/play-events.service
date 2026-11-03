@@ -1,0 +1,15 @@
+[Unit]
+Description=Memory Spark Station play activity recorder (propkit events)
+After=soundtrigger.service
+
+[Service]
+Type=simple
+User=soundconsole
+WorkingDirectory=/home/soundconsole/sound-machine
+ExecStart=/usr/bin/python3 /home/soundconsole/sound-machine/daemon/play_events.py
+Restart=on-failure
+RestartSec=5
+Nice=10
+
+[Install]
+WantedBy=multi-user.target
