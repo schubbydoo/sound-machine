@@ -8,6 +8,8 @@ import threading
 import datetime
 from pathlib import Path
 
+from propkit.atomic import write_json
+
 from .config import config
 
 # Path configuration - all paths come from centralized config module
@@ -44,8 +46,7 @@ def bt_load_config():
 
 def bt_save_config(cfg):
     BT_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(BT_CONFIG_PATH, 'w', encoding='utf-8') as f:
-        json.dump(cfg, f, indent=2)
+    write_json(str(BT_CONFIG_PATH), cfg)       # atomic: a reader never sees a half-written file
 
 def bt_run(cmd):
     try:

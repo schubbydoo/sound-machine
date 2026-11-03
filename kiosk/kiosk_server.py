@@ -505,7 +505,10 @@ def api_library_download(stable_id):
                 if arc_path in zf.namelist():
                     dest = SOUNDS_DIR / btn['filename']
                     if not dest.exists():
-                        dest.write_bytes(zf.read(arc_path))
+                        # write aside, then rename: a power cut must not leave a truncated WAV that is never re-fetched
+                        part = dest.with_name('.' + dest.name + '.part')
+                        part.write_bytes(zf.read(arc_path))
+                        os.replace(part, dest)
 
             # Install profile and button mappings
             conn = _db()

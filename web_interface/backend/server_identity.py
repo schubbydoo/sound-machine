@@ -17,6 +17,8 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
+from propkit.atomic import write_text
+
 # File names within data directory
 SERVER_ID_FILE = "server_id.txt"
 SERVER_NAME_FILE = "server_name.txt"
@@ -56,7 +58,7 @@ def get_server_id(data_dir: Path) -> str:
     # Persist it
     try:
         data_dir.mkdir(parents=True, exist_ok=True)
-        id_file.write_text(new_id, encoding="utf-8")
+        write_text(str(id_file), new_id)           # atomic: never read back half-written (which would mint a new id)
         print(f"[SERVER] Generated new server_id and persisted it")
     except OSError as e:
         print(f"[SERVER] Warning: Could not persist server_id: {e}")
