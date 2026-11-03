@@ -32,11 +32,13 @@ for _name, _env in (("netguard", "NETGUARD_DIR"), ("propkit", "PROPKIT_DIR")):
 import propkit
 from propkit import flask_app as propkit_flask
 from propkit import stats as pkstats
+from propkit.files import FileLibrary, Option
 
 from . import network_utils as nu
 from .storage import get_storage_adapter, get_trackpack_updated_at as storage_get_updated_at
 from .server_identity import get_server_id, get_server_name
 from .config import config
+from .track_store import TrackStore
 
 # Path configuration - all paths come from centralized config module
 DB_PATH = config.db_path
@@ -179,6 +181,9 @@ def index():
 
     all_files = conn.execute("SELECT * FROM audio_files ORDER BY filename").fetchall()
 
+    if active_profile_id:       # the Media tab's "assign to free buttons" uses the track you last had open here
+        conn.execute("INSERT OR REPLACE INTO system_config (key, value) VALUES ('last_profile_id', ?)", (str(active_profile_id),))
+        conn.commit()
     conn.close()
     
     return render_template("index.html", active_page="tracks",
@@ -920,10 +925,53 @@ def _prop_banner():
     return None
 
 
+def _track_usage(name, collection=None):
+    """Where a track is used: one link per button that plays it."""
+    conn = get_db()
+    try:
+        rows = conn.execute("""SELECT bm.button_id, p.id AS pid, p.name FROM button_mappings bm
+                               JOIN audio_files af ON bm.audio_file_id = af.id JOIN profiles p ON bm.profile_id = p.id
+                               WHERE af.filename = ? ORDER BY p.name, bm.button_id""", (name,)).fetchall()
+    finally:
+        conn.close()
+    return [{"label": "Button %d in track %s" % (r["button_id"], r["name"]), "href": "/?profile_id=%d" % r["pid"]} for r in rows]
+
+
+def _auto_assign(names, options, collection=None):
+    """Put new tracks on the next free buttons of the track last opened on the Tracks tab (the old 'starting at button N')."""
+    if not (options or {}).get("auto_assign"):
+        return
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT value FROM system_config WHERE key = 'last_profile_id'").fetchone()
+        pid = int(row["value"]) if row else None
+        if not pid or not conn.execute("SELECT 1 FROM profiles WHERE id = ?", (pid,)).fetchone():
+            return
+        used = {r["button_id"] for r in conn.execute("SELECT button_id FROM button_mappings WHERE profile_id = ?", (pid,)).fetchall()}
+        free = [b for b in range(1, 17) if b not in used]
+        for name in names:
+            af = conn.execute("SELECT id FROM audio_files WHERE filename = ?", (name,)).fetchone()
+            already = af and conn.execute("SELECT 1 FROM button_mappings WHERE profile_id = ? AND audio_file_id = ?", (pid, af["id"])).fetchone()
+            if af and free and not already:
+                conn.execute("INSERT OR REPLACE INTO button_mappings (profile_id, button_id, audio_file_id) VALUES (?, ?, ?)", (pid, free.pop(0), af["id"]))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+track_files = FileLibrary(
+    store=TrackStore(get_db, SOUNDS_ROOT, needs_conversion, convert_wav),
+    kind="audio", noun="track", title="Media", accept=(".wav",),
+    intro="Upload sounds (WAV), listen, describe and delete them here. Pick which button plays which sound on the Tracks tab.",
+    upload_options=[Option("auto_assign", "Put new sounds on the next free buttons of the track last open on the Tracks tab")],
+    after_upload=_auto_assign, usage=_track_usage,
+    on_rename=lambda name, new, collection=None: None)        # buttons point at the track's id, so a rename needs no rewrite
+
 propkit_cfg = propkit.PropConfig(
     name="Memory Spark Station", brand=("MEMORY", "SPARK"),
-    tabs=[("dashboard", "/dashboard", "Dashboard"), ("tracks", "/", "Tracks"), ("bluetooth", "/bt", "Bluetooth"),
-          ("system", "/system", "System")],
+    tabs=[("dashboard", "/dashboard", "Dashboard"), ("media", "/media", "Media"), ("tracks", "/", "Tracks"),
+          ("bluetooth", "/bt", "Bluetooth"), ("system", "/system", "System")],
+    files=track_files,
     service_name="webui.service", base_dir=str(BASE_DIR), state_dir=str(STATE_DIR),
     hotspot_profile="PropManager-AP",
     events_dir=str(ACTIVITY_DIR),

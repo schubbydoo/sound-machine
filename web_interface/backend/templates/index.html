@@ -12,9 +12,6 @@
     .tm-toolbar .field { margin-bottom: 0; }
     .tm-desc { margin-top: 14px; padding: 10px 14px; border-left: 3px solid var(--accent3); background: rgba(77,141,255,.07); font-size: 14px; line-height: 1.5; display: none; }
     .tm-desc strong { color: var(--muted); font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; margin-right: 6px; }
-    .tm-filepick { display: flex; align-items: center; gap: 12px; min-width: 0; }
-    .tm-filepick input[type=file] { display: none; }
-    .tm-filename { color: var(--muted); font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
     /* Button assignments */
     .tm-table { min-width: 0 !important; table-layout: fixed; }
@@ -56,11 +53,6 @@
     .modal-card-head .delete::before { content: "\00d7"; } .modal-card-head .delete:hover { color: var(--text); }
     .modal-card-body { padding: 16px 22px; overflow-y: auto; }
     .modal-card-foot { display: flex; gap: 12px; padding: 0 22px 20px; flex-wrap: wrap; }
-    .tm-files-tools { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
-    .tm-files-tools .input { flex: 1 1 200px; }
-    .tm-files-list { max-height: 52vh; overflow: auto; }
-    .tm-files-list .table { min-width: 0 !important; }
-    .tm-files-list .path { color: var(--muted); font-size: 11.5px; word-break: break-all; }
 </style>
 {% endblock %}
 {% block content %}
@@ -106,40 +98,6 @@
         </div>
     </div>
     <div id="descriptionDisplay" class="tm-desc"><strong>Description</strong><span id="descText"></span></div>
-</div>
-
-<!-- Upload -->
-<div class="box">
-    <div class="tm-head">
-        <h2 class="title is-4">Upload audio</h2>
-        <button class="button is-danger is-light is-small" onclick="openFilesModal()"><i class="fas fa-trash"></i>&nbsp; Manage files</button>
-    </div>
-    <form id="uploadForm" onsubmit="return uploadFiles(event)">
-        <input type="hidden" name="profile_id" value="{{ active_profile_id }}">
-        <div class="tm-toolbar">
-            <div class="field tm-grow">
-                <span class="label">WAV files</span>
-                <div class="tm-filepick">
-                    <label class="button is-info is-small" for="fileInput"><i class="fas fa-upload"></i>&nbsp; Choose files</label>
-                    <input type="file" name="file" multiple accept=".wav" id="fileInput">
-                    <span class="tm-filename" id="fileName">No file chosen</span>
-                </div>
-            </div>
-            <div class="field tm-fixed">
-                <label class="label" for="autoAssign">Auto-assign</label>
-                <div class="select is-fullwidth">
-                    <select id="autoAssign" name="auto_assign_start">
-                        <option value="">Don't assign</option>
-                        {% for i in range(1, 17) %}<option value="{{ i }}">Starting at button {{ i }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-            </div>
-            <div class="field">
-                <button class="button is-primary" type="submit">Upload</button>
-            </div>
-        </div>
-    </form>
 </div>
 
 <!-- Button mappings -->
@@ -242,55 +200,7 @@
   </div>
 </div>
 
-<!-- File Management Modal -->
-<div class="modal" id="filesModal">
-  <div class="modal-background" onclick="closeFilesModal()"></div>
-  <div class="modal-card is-wide">
-    <header class="modal-card-head">
-      <p class="modal-card-title">Manage audio files</p>
-      <button class="delete" aria-label="close" onclick="closeFilesModal()"></button>
-    </header>
-    <section class="modal-card-body">
-      <div class="tm-files-tools">
-          <input class="input" type="search" id="fileFilter" placeholder="Filter files…" oninput="filterFiles(this.value)">
-          <button class="button is-danger" onclick="deleteSelectedFiles()" id="deleteBtn" disabled>Delete selected</button>
-      </div>
-      <p class="help" style="margin-bottom:10px">Tick files to delete them permanently.</p>
-      <div class="tm-files-list">
-          <table class="table is-narrow">
-            <thead>
-                <tr>
-                    <th style="width:40px"><input type="checkbox" onchange="toggleAllFiles(this)" aria-label="Select all shown"></th>
-                    <th>Filename</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for f in all_files %}
-                <tr class="file-row">
-                    <td><input type="checkbox" class="file-check" value="{{ f.id }}" onchange="updateDeleteBtn()"></td>
-                    <td><span class="file-name-text">{{ f.filename }}</span><div class="path">{{ f.filepath }}</div></td>
-                </tr>
-                {% endfor %}
-            </tbody>
-          </table>
-      </div>
-    </section>
-  </div>
-</div>
-
 <script>
-// File input name update
-document.addEventListener('DOMContentLoaded', () => {
-    const fileInput = document.querySelector('#fileInput');
-    if (fileInput) {
-        fileInput.onchange = () => {
-            const fileNameEl = document.querySelector('#fileName');
-            const n = fileInput.files.length;
-            if (fileNameEl) fileNameEl.textContent = n === 0 ? 'No file chosen' : (n === 1 ? fileInput.files[0].name : n + ' files selected');
-        };
-    }
-});
-
 function switchProfile(id) {
     window.location.href = '/?profile_id=' + id;
 }
@@ -379,25 +289,6 @@ async function saveInstructions() {
     else alert('Error saving instructions');
 }
 
-
-async function uploadFiles(ev) {
-    ev.preventDefault();
-    const form = document.getElementById('uploadForm');
-    const fd = new FormData(form);
-    const btn = form.querySelector('button[type="submit"]');
-    btn.classList.add('is-loading');
-
-    try {
-        const res = await fetch('/upload', {method: 'POST', body: fd});
-        const js = await res.json();
-        if (js.ok) location.reload();
-        else alert(js.error);
-    } catch(e) {
-        alert("Upload error");
-    } finally {
-        btn.classList.remove('is-loading');
-    }
-}
 
 async function assignButton(btnId, audioId) {
     const fd = new FormData();
@@ -531,75 +422,5 @@ async function saveInlineEdit(rowNum) {
     }
 }
 
-// File Management Modal Functions
-function openFilesModal() {
-    document.getElementById('filesModal').classList.add('is-active');
-}
-
-function closeFilesModal() {
-    document.getElementById('filesModal').classList.remove('is-active');
-}
-
-function filterFiles(q) {
-    q = q.trim().toLowerCase();
-    document.querySelectorAll('#filesModal .file-row').forEach(tr => {
-        const name = tr.querySelector('.file-name-text').textContent.toLowerCase();
-        tr.style.display = !q || name.includes(q) ? '' : 'none';
-    });
-}
-
-function toggleAllFiles(source) {
-    // Only the rows currently shown by the filter
-    document.querySelectorAll('#filesModal .file-row').forEach(tr => {
-        if (tr.style.display !== 'none') tr.querySelector('.file-check').checked = source.checked;
-    });
-    updateDeleteBtn();
-}
-
-function updateDeleteBtn() {
-    const checkboxes = document.querySelectorAll('.file-check:checked');
-    const btn = document.getElementById('deleteBtn');
-    if (checkboxes.length > 0) {
-        btn.removeAttribute('disabled');
-        btn.innerText = `Delete selected (${checkboxes.length})`;
-    } else {
-        btn.setAttribute('disabled', 'true');
-        btn.innerText = 'Delete selected';
-    }
-}
-
-async function deleteSelectedFiles() {
-    const checkboxes = document.querySelectorAll('.file-check:checked');
-    if (checkboxes.length === 0) return;
-
-    if (!confirm(`Are you sure you want to delete ${checkboxes.length} files? This cannot be undone.`)) return;
-
-    const ids = [];
-    checkboxes.forEach((cb) => ids.push(cb.value));
-
-    const btn = document.getElementById('deleteBtn');
-    btn.classList.add('is-loading');
-
-    try {
-        const res = await fetch('/api/audio/delete', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ids: ids})
-        });
-        const js = await res.json();
-        if (js.ok) {
-            if (js.errors && js.errors.length > 0) {
-                alert("Some files could not be deleted:\n" + js.errors.join("\n"));
-            }
-            location.reload();
-        } else {
-            alert(js.error);
-        }
-    } catch (e) {
-        alert("Delete failed: " + e);
-    } finally {
-        btn.classList.remove('is-loading');
-    }
-}
 </script>
 {% endblock %}
